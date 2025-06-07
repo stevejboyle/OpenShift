@@ -1,0 +1,9 @@
+*.ova
+*.iso
+*.ign
+install-config.yaml
+pull-secret.json
+ssh-key.pem
+build-config/
+manifests/
+openshift/

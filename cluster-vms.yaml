@@ -1,0 +1,18 @@
+clusterName: ocp416
+baseDomain: openshift.sboyle.internal
+vms:
+  bootstrap:
+    ip: 192.168.42.30
+    ign: bootstrap.ign
+  master-0:
+    ip: 192.168.42.31
+    ign: master.ign
+  master-1:
+    ip: 192.168.42.32
+    ign: master.ign
+  master-2:
+    ip: 192.168.42.33
+    ign: master.ign
+  worker-0:
+    ip: 192.168.42.40
+    ign: worker.ign

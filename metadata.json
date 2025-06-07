@@ -1,0 +1,1 @@
+{"clusterName":"ocp416","clusterID":"7a3dd42d-3b14-413c-b6a0-a3323b131137","infraID":"ocp416-jmdsx","vsphere":{"vCenter":"vcenter1.sboyle.internal","username":"administrator@vsphere.sboyle.internal","password":"\u003cYOUR_VSPHERE_PASSWORD_HERE\u003e","terraform_platform":"vsphere"},"featureSet":"","customFeatureSet":null}
