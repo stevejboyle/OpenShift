@@ -6,5 +6,4 @@ pull-secret.json
 ssh-key.pem
 build-config/
 manifests/
-openshift/
-*.vmx
+console-password.txt

@@ -11,6 +11,12 @@ SSH_KEY_FILE="./ssh-key.pub"
 PULL_SECRET=$(cat $PULL_SECRET_FILE)
 SSH_KEY=$(cat $SSH_KEY_FILE)
 
+if [[ -f "${SCRIPT_DIR}/console-password.txt" ]]; then
+  PASSWORD_HASH=$(cat "${SCRIPT_DIR}/console-password.txt")
+else
+  PASSWORD_HASH=""
+fi
+
 mkdir -p build-config
 
 cat > build-config/install-config.yaml <<EOL
@@ -22,6 +28,10 @@ compute:
 - name: worker
   replicas: 1
   platform:
+  passwd:
+    users:
+      - name: core
+        passwordHash: "$6$yJYZ5ExampleHashedPassword"
     vsphere:
       cpus: 4
       memoryMB: 16384
