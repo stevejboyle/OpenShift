@@ -2,6 +2,9 @@
 
 set -e
 
+# Enable or disable debug logging
+DEBUG=true
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/govc.env"
 
@@ -15,6 +18,7 @@ CLUSTER_NAME=$(yq '.clusterName' "$VM_FILE")
 BASE_DOMAIN=$(yq '.baseDomain' "$VM_FILE")
 OVA_PATH="${SCRIPT_DIR}/rhcos-4.16.36-x86_64-vmware.x86_64.ova"
 
+# Import OVA as template if not present
 if ! govc ls "${GOVC_FOLDER}/rhcos-template" &>/dev/null; then
   echo "Importing RHCOS OVA..."
   govc import.ova -name rhcos-template -folder "$GOVC_FOLDER" "$OVA_PATH"
@@ -26,24 +30,29 @@ fi
 for VM in $(yq -r '.vms | keys[]' "$VM_FILE"); do
   IP=$(yq -r ".vms.${VM}.ip" "$VM_FILE")
   IGN=$(yq -r ".vms.${VM}.ign" "$VM_FILE")
-  VMNAME="${VM}.${CLUSTER_NAME}.${BASE_DOMAIN}"
+  VMNAME="${VM}"
 
   echo "🚀 Deploying $VMNAME"
 
   govc vm.clone -vm "${GOVC_FOLDER}/rhcos-template" -on=false -folder "$GOVC_FOLDER" "$VMNAME"
+  govc vm.network.add -vm "$VMNAME" -net "$GOVC_NETWORK" -net.adapter vmxnet3
 
-  # Ensure NIC exists
-  govc device.network.add -vm "$VMNAME" -net "$GOVC_NETWORK"
+  ENCODED_IGN=$(base64 -w0 < "${SCRIPT_DIR}/${IGN}")
 
-  # Confirm NIC reconfiguration
-  govc vm.network.change -vm "$VMNAME" -net "$GOVC_NETWORK" ethernet-0 || true
+  if [ "$DEBUG" = true ]; then
+    echo "Applying Ignition to VM: $VMNAME"
+    echo "Encoding: base64"
+    echo "Payload length: ${#ENCODED_IGN} characters"
+  fi
 
-  ENCODED_IGN=$(cat "${SCRIPT_DIR}/${IGN}" | base64 | tr -d '\n')
-  govc vm.change -vm "$VMNAME" \
-    -e "guestinfo.ignition.config.data=${ENCODED_IGN}" \
-    -e "guestinfo.ignition.config.data.encoding=base64"
+  # Apply encoding key first (small)
+  govc vm.change -vm "$VMNAME" -e "guestinfo.ignition.config.data.encoding=base64"
 
-  govc vm.power.on "$VMNAME"
+  # Apply large Ignition payload separately
+  govc vm.change -vm "$VMNAME" -e "guestinfo.ignition.config.data=${ENCODED_IGN}"
+
+  govc vm.power -on "$VMNAME"
 done
 
 echo "✅ All VMs deployed successfully."
+

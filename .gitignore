@@ -7,3 +7,4 @@ ssh-key.pem
 build-config/
 manifests/
 openshift/
+*.vmx
