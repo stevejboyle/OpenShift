@@ -1,9 +1,26 @@
-*.ova
-*.iso
-*.ign
-install-config.yaml
-pull-secret.json
-ssh-key.pem
-build-config/
+# Ignore cluster-specific generated files
+install-configs/
+openshift/
 manifests/
-console-password.txt
+auth/
+*.ign
+*.json
+*.yaml.bak
+
+# Ignore secrets
+govc.env
+assets/pull-secret.json
+assets/console-password.txt
+assets/ssh-key.pem
+assets/*.ova
+assets/*.iso
+
+# Ignore temp files
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+
+# Ignore packaged zips
+*.zip
