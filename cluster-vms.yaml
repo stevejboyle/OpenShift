@@ -14,5 +14,6 @@ vms:
     ip: 192.168.42.33
     ign: master.ign
   worker-0:
-    ip: 192.168.42.40
+    ign: worker.ign
+  worker-1:
     ign: worker.ign
