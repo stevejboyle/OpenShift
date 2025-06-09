@@ -8,6 +8,8 @@ if [ -z "$CLUSTER_FILE" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/load-vcenter-env.sh"
+
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 mkdir -p "${BASE_DIR}/install-configs"
 

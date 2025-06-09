@@ -8,9 +8,9 @@ if [ -z "$CLUSTER_FILE" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-source "${BASE_DIR}/govc.env"
+source "${SCRIPT_DIR}/load-vcenter-env.sh"
 
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
 VM_FOLDER=$(yq '.vsphere.folder' "$CLUSTER_FILE")
 
 echo "⚠ WARNING: This will delete all VMs AND generated ignition/config files for cluster: ${CLUSTER_FILE}!"
@@ -25,7 +25,7 @@ for VM in $(yq -r '.vms | keys[]' "$CLUSTER_FILE"); do
   VM_PATH="${VM_FOLDER}/${VM}"
   if govc vm.info "$VM_PATH" &>/dev/null; then
     echo "🗑 Deleting VM: $VM_PATH"
-    govc vm.power.off -force "$VM_PATH" || true
+    govc vm.power -off -force "$VM_PATH" || true
     govc vm.destroy "$VM_PATH"
   else
     echo "⚠ VM not found: $VM_PATH"

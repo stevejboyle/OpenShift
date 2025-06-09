@@ -8,9 +8,10 @@ if [ -z "$CLUSTER_FILE" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+source "${SCRIPT_DIR}/load-vcenter-env.sh"
+
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 OVA_PATH="${BASE_DIR}/assets/rhcos-4.16.36-x86_64-vmware.x86_64.ova"
-source "${BASE_DIR}/govc.env"
 
 VM_FOLDER=$(yq '.vsphere.folder' "$CLUSTER_FILE")
 VM_NETWORK=$(yq '.vsphere.network' "$CLUSTER_FILE")
@@ -39,7 +40,7 @@ for VM in $(yq -r '.vms | keys[]' "$CLUSTER_FILE"); do
   govc vm.change -vm "$VMNAME" -e "guestinfo.ignition.config.data.encoding=base64"
   govc vm.change -vm "$VMNAME" -e "guestinfo.ignition.config.data=${ENCODED_IGN}"
 
-  govc vm.power.on "$VMNAME"
+  govc vm.power -on "$VMNAME"
 done
 
 echo "✅ All VMs deployed successfully."
