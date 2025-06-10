@@ -1,46 +1,39 @@
-#!/bin/bash
+#!/bin/zsh
 set -e
 
-CLUSTER_FILE=$1
-if [ -z "$CLUSTER_FILE" ]; then
+CLUSTER_YAML="$1"
+if [[ -z "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml>"
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "${SCRIPT_DIR}/load-vcenter-env.sh"
+SCRIPTS="$(dirname "$0")"
+source "${SCRIPTS}/load-vcenter-env.sh"
+BASE_DIR="$(dirname "$SCRIPTS")"
+OVA="${BASE_DIR}/assets/rhcos-4.16.36-x86_64-vmware.x86_64.ova"
 
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-OVA_PATH="${BASE_DIR}/assets/rhcos-4.16.36-x86_64-vmware.x86_64.ova"
+VMF="$(yq '.vcenter_folder' "$CLUSTER_YAML")"
+VMN="$(yq '.vcenter_network' "$CLUSTER_YAML")"
 
-VM_FOLDER=$(yq '.vsphere.folder' "$CLUSTER_FILE")
-VM_NETWORK=$(yq '.vsphere.network' "$CLUSTER_FILE")
-
-if ! govc ls "${VM_FOLDER}/rhcos-template" &>/dev/null; then
-  echo "Importing RHCOS OVA..."
-  govc import.ova -name rhcos-template -folder "$VM_FOLDER" "$OVA_PATH"
-  govc vm.markastemplate "${VM_FOLDER}/rhcos-template"
-else
-  echo "✅ RHCOS template already exists."
+# Import template if needed
+if ! govc ls "${VMF}/rhcos-template" &>/dev/null; then
+  govc import.ova -name rhcos-template -folder "$VMF" "$OVA"
+  govc vm.markastemplate "${VMF}/rhcos-template"
 fi
 
-for VM in $(yq -r '.vms | keys[]' "$CLUSTER_FILE"); do
-  IGN="${BASE_DIR}/install-configs/${VM}.ign"
-  VMNAME="${VM}"
+# Clone & configure
+for vm in $(yq -r '.vms|keys[]' "$CLUSTER_YAML"); do
+  echo "🚀 Deploying $vm..."
+  govc vm.clone -vm "${VMF}/rhcos-template" -on=false -folder "$VMF" "$vm"
+  govc vm.network.add -vm "$vm" -net "$VMN" -net.adapter vmxnet3
 
-  echo "🚀 Deploying $VMNAME"
-  govc vm.clone -vm "${VM_FOLDER}/rhcos-template" -on=false -folder "$VM_FOLDER" "$VMNAME"
-  govc vm.network.add -vm "$VMNAME" -net "$VM_NETWORK" -net.adapter vmxnet3
+  ign="${BASE_DIR}/install-configs/${vm}.ign"
+  enc="$(base64 -w0 <"$ign")"
 
-  ENCODED_IGN=$(base64 -w0 < "${IGN}")
+  govc vm.change -vm "$vm" -e "guestinfo.ignition.config.data.encoding=base64"
+  govc vm.change -vm "$vm" -e "guestinfo.ignition.config.data=${enc}"
 
-  echo "Applying Ignition to VM: $VMNAME"
-  echo "Payload length: ${#ENCODED_IGN} characters"
-
-  govc vm.change -vm "$VMNAME" -e "guestinfo.ignition.config.data.encoding=base64"
-  govc vm.change -vm "$VMNAME" -e "guestinfo.ignition.config.data=${ENCODED_IGN}"
-
-  govc vm.power -on "$VMNAME"
+  govc vm.power -on "$vm"
 done
 
-echo "✅ All VMs deployed successfully."
+echo "✅ All VMs deployed."

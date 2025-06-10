@@ -1,26 +1,33 @@
-#!/bin/bash
+#!/bin/zsh
 set -e
 
-CLUSTER_FILE=$1
-if [ -z "$CLUSTER_FILE" ]; then
+CLUSTER_YAML="$1"
+if [[ -z "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml>"
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "${SCRIPT_DIR}/load-vcenter-env.sh"
+SCRIPTS="$(dirname "$0")"
+source "${SCRIPTS}/load-vcenter-env.sh"
 
-${SCRIPT_DIR}/generate-install-config.sh "$CLUSTER_FILE"
+# 1. Generate install-config
+"${SCRIPTS}/generate-install-config.sh" "$CLUSTER_YAML"
 
-cd "${SCRIPT_DIR}/../install-configs"
+# 2. Create manifests
+cd "$(dirname "$SCRIPTS")/install-configs"
+export OPENSHIFT_INSTALL_EXPERIMENTAL_OVERRIDES='{ "disableTemplatedInstallConfig": true }'
+openshift-install create manifests
+cd "${SCRIPTS}"
+
+# 3. Inject vsphere-creds
+"${SCRIPTS}/generate-vsphere-creds-manifest.sh"
+
+# 4. Inject console password
+"${SCRIPTS}/generate-console-password-manifests.sh" "$CLUSTER_YAML"
+
+# 5. Create ignitions
+cd "$(dirname "$SCRIPTS")/install-configs"
 openshift-install create ignition-configs
+cd "${SCRIPTS}"
 
-for VM in $(yq -r '.vms | keys[]' "$CLUSTER_FILE"); do
-  ROLE="worker"
-  [[ "$VM" == master* ]] && ROLE="master"
-  [[ "$VM" == bootstrap ]] && ROLE="bootstrap"
-  cp "${ROLE}.ign" "${VM}.ign"
-done
-
-${SCRIPT_DIR}/deploy-vms.sh "$CLUSTER_FILE"
-
+echo "✅ Manifests & ignitions ready; run deploy-vms.sh now."
