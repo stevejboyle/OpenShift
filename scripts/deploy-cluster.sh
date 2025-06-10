@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-CLUSTER_YAML="$1"
-if [[ -z "$CLUSTER_YAML" ]]; then
+CLUSTER_YAML="$(realpath "$1")"
+if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml>"
+  echo "❌ Cluster file not found: $1"
   exit 1
 fi
 

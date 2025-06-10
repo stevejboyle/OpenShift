@@ -1,15 +1,22 @@
 #!/usr/bin/env bash
 set -e
 
-CLUSTER_YAML="$1"
-if [[ -z "$CLUSTER_YAML" ]]; then
+CLUSTER_YAML="$(realpath "$1")"
+if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml>"
+  echo "❌ Cluster file not found: $1"
   exit 1
 fi
 
 # Get cluster name and password file
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
-pwf=$(yq '.consolePasswordFile' "$CLUSTER_YAML")
+pwf=$(yq -r '.consolePasswordFile' "$CLUSTER_YAML")
+
+# Resolve relative paths relative to the cluster YAML location
+CLUSTER_DIR="$(dirname "$CLUSTER_YAML")"
+if [[ ! "$pwf" = /* ]]; then
+  pwf="${CLUSTER_DIR}/../${pwf}"
+fi
 
 if [[ -f "$pwf" ]]; then
   h=$(<"$pwf")
@@ -60,5 +67,5 @@ EOF
 
   echo "✅ Console password manifests generated for cluster ${CLUSTER_NAME}."
 else
-  echo "⚠ No console-password file defined; skipping."
+  echo "⚠ No console-password file found at: $pwf; skipping."
 fi

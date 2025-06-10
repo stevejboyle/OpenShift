@@ -6,7 +6,7 @@ if [ $# -ne 1 ]; then
   exit 1
 fi
 
-CLUSTER_YAML=$1
+CLUSTER_YAML="$(realpath "$1")"
 if [ ! -f "$CLUSTER_YAML" ]; then
   echo "❌ Cluster file not found: $CLUSTER_YAML"
   exit 1

@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
-CLUSTER_YAML="$1"
-if [[ -z "$CLUSTER_YAML" ]]; then
+CLUSTER_YAML="$(realpath "$1")"
+if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml>"
+  echo "❌ Cluster file not found: $1"
   exit 1
 fi
 
@@ -32,18 +33,23 @@ if govc ls "$VMF" &>/dev/null; then
     govc vm.destroy "$vm_path" || true
   done
   
-  # Delete the template too
-  template_path="${VMF}/rhcos-template-${CLUSTER_NAME}"
-  if govc ls "$template_path" &>/dev/null; then
-    echo "🗑 Deleting template..."
-    govc vm.destroy "$template_path" || true
+  # Remove the VM folder if it's empty after VM deletion
+  if govc ls "$VMF" &>/dev/null; then
+    # Check if folder is empty
+    folder_contents="$(govc ls "$VMF" 2>/dev/null || true)"
+    if [[ -z "$folder_contents" ]]; then
+      echo "🗑 Removing empty VM folder..."
+      govc object.destroy "$VMF" || true
+    else
+      echo "⚠ VM folder not empty, leaving: $VMF"
+    fi
   fi
-  
-  # Remove the VM folder
-  govc folder.destroy "$VMF" || true
 else
   echo "⚠ VM folder not found: $VMF"
 fi
+
+# Don't delete shared template - it's reusable across clusters
+# The template at /Lab/vm/OpenShift/rhcos-template is shared and should be preserved
 
 # Remove cluster-specific generated install-configs
 rm -rf "${BASE_DIR}/install-configs/${CLUSTER_NAME}"
