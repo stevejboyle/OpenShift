@@ -1,53 +1,46 @@
-#!/usr/bin/env zsh
+#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
+if [ $# -ne 1 ]; then
   echo "Usage: $0 <cluster.yaml>"
   exit 1
 fi
 
 CLUSTER_YAML=$1
-if [[ ! -f "$CLUSTER_YAML" ]]; then
+if [ ! -f "$CLUSTER_YAML" ]; then
   echo "❌ Cluster file not found: $CLUSTER_YAML"
   exit 1
 fi
 
-SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+# Load govc credentials
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/load-vcenter-env.sh"
-BASE_DIR=$(dirname "$SCRIPT_DIR")
-mkdir -p "${BASE_DIR}/install-configs"
 
-# Parse values
-CLUSTER_NAME=$(yq -r '.clusterName' "$CLUSTER_YAML")
-BASE_DOMAIN=$(yq -r '.baseDomain'  "$CLUSTER_YAML")
-VCENTER_SERVER=$(yq -r '.vcenter_server'   "$CLUSTER_YAML")
-VCENTER_USERNAME=$(yq -r '.vcenter_username' "$CLUSTER_YAML")
-VCENTER_PASSWORD=$(yq -r '.vcenter_password' "$CLUSTER_YAML")
-VCENTER_DATACENTER=$(yq -r '.vcenter_datacenter' "$CLUSTER_YAML")
-VCENTER_CLUSTER=$(yq -r '.vcenter_cluster'   "$CLUSTER_YAML")
-VCENTER_DATASTORE=$(yq -r '.vcenter_datastore' "$CLUSTER_YAML")
-VCENTER_NETWORK=$(yq -r '.vcenter_network'   "$CLUSTER_YAML")
-SSH_KEY_FILE=$(yq -r '.sshKeyFile' "$CLUSTER_YAML")
-PULL_SECRET_FILE=$(yq -r '.pullSecretFile' "$CLUSTER_YAML")
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Validate pull-secret and SSH key
-if [[ ! -f "$SSH_KEY_FILE" || ! -f "$PULL_SECRET_FILE" ]]; then
-  echo "❌ Missing SSH key or Pull Secret file"
-  exit 1
-fi
+# Read cluster settings
+CN=$(yq -r '.clusterName'       "$CLUSTER_YAML")
+BD=$(yq -r '.baseDomain'        "$CLUSTER_YAML")
+PS=$(<"$(yq -r '.pullSecretFile' "$CLUSTER_YAML")")
+SK=$(<"$(yq -r '.sshKeyFile'     "$CLUSTER_YAML")")
 
-SSH_KEY=$(<"$SSH_KEY_FILE")
-PULL_SECRET=$(<"$PULL_SECRET_FILE")
+VC_SERVER=$(yq -r '.vcenter_server'   "$CLUSTER_YAML")
+VC_DC=$(yq -r '.vcenter_datacenter'   "$CLUSTER_YAML")
+VC_CLUSTER=$(yq -r '.vcenter_cluster' "$CLUSTER_YAML")
+VC_DS=$(yq -r '.vcenter_datastore'    "$CLUSTER_YAML")
+VC_NET=$(yq -r '.vcenter_network'     "$CLUSTER_YAML")
+NETWORK_CIDR=$(yq -r '.network.cidr'  "$CLUSTER_YAML")
 
-# Build vSphere paths
-CLUSTER_PATH="/${VCENTER_DATACENTER}/host/${VCENTER_CLUSTER}"
-DATASTORE_PATH="/${VCENTER_DATACENTER}/datastore/${VCENTER_DATASTORE}"
+# Create cluster-specific directory
+INSTALL_DIR="${BASE_DIR}/install-configs/${CN}"
+mkdir -p "$INSTALL_DIR"
 
-cat > "${BASE_DIR}/install-configs/install-config.yaml" <<EOF
+# Emit clean install-config.yaml
+cat > "${INSTALL_DIR}/install-config.yaml" <<EOF
 apiVersion: v1
-baseDomain: ${BASE_DOMAIN}
+baseDomain: ${BD}
 metadata:
-  name: ${CLUSTER_NAME}
+  name: ${CN}
 compute:
 - name: worker
   replicas: 0
@@ -57,30 +50,29 @@ controlPlane:
 platform:
   vsphere:
     vcenters:
-    - server: ${VCENTER_SERVER}
-      username: ${VCENTER_USERNAME}
-      password: ${VCENTER_PASSWORD}
+    - server: ${VC_SERVER}
+      user: ${GOVC_USERNAME}
+      password: ${GOVC_PASSWORD}
       datacenters:
-      - ${VCENTER_DATACENTER}
+      - ${VC_DC}
     failureDomains:
     - name: primary
       region: region-a
       zone: zone-a
-      server: ${VCENTER_SERVER}
+      server: ${VC_SERVER}
       topology:
-        datacenter: ${VCENTER_DATACENTER}
-        computeCluster: ${CLUSTER_PATH}
-        datastore: ${DATASTORE_PATH}
+        datacenter: ${VC_DC}
+        computeCluster: "/${VC_DC}/host/${VC_CLUSTER}"
+        datastore: "/${VC_DC}/datastore/${VC_DS}"
         networks:
-        - ${VCENTER_NETWORK}
+        - ${VC_NET}
 networking:
   machineNetwork:
-  - cidr: $(yq -r '.network.cidr' "$CLUSTER_YAML")
+  - cidr: ${NETWORK_CIDR}
   networkType: OVNKubernetes
-pullSecret: |
-$(printf '  %s\n' "${PULL_SECRET}")
+pullSecret: '${PS}'
 sshKey: |
-  ${SSH_KEY}
+  ${SK}
 EOF
 
-echo "✅ install-config.yaml generated at ${BASE_DIR}/install-configs/install-config.yaml"
+echo "✅ install-config.yaml generated at: ${INSTALL_DIR}/install-config.yaml"

@@ -10,3 +10,5 @@ vcenter_network: OpenShift_192.168.42.0
 sshKeyFile: assets/ssh-key.pub
 pullSecretFile: assets/pull-secret.json
 consolePasswordFile: assets/console-password.txt
+network:
+  cidr: 192.168.42.0/24

@@ -1,19 +1,21 @@
-#!/bin/zsh
-set -e
+#!/usr/bin/env bash
+# Simple environment loader - no parameters needed
+set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Load govc.env
-if [[ ! -f "${BASE_DIR}/govc.env" ]]; then
-  echo "❌ govc.env not found in ${BASE_DIR}"
+# Load govc environment
+if [[ -f "${BASE_DIR}/govc.env" ]]; then
+  source "${BASE_DIR}/govc.env"
+  echo "✅ vCenter environment loaded from govc.env"
+else
+  echo "❌ govc.env not found at ${BASE_DIR}/govc.env"
   exit 1
 fi
-source "${BASE_DIR}/govc.env"
 
-# Prompt for password if not already set
-if [[ -z "$GOVC_PASSWORD" ]]; then
-  echo "🔐 Enter vSphere password for ${GOVC_USERNAME}:"
-  read -s GOVC_PASSWORD
-  export GOVC_PASSWORD
+# Validate required variables
+if [[ -z "$GOVC_URL" || -z "$GOVC_USERNAME" ]]; then
+  echo "❌ Required GOVC environment variables not set"
+  exit 1
 fi
