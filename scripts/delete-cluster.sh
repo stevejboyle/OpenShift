@@ -1,9 +1,26 @@
 #!/usr/bin/env bash
 set -e
 
-CLUSTER_YAML="$(realpath "$1")"
+# Parse arguments
+FORCE_DELETE=false
+CLUSTER_YAML=""
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -f|--force)
+      FORCE_DELETE=true
+      shift
+      ;;
+    *)
+      CLUSTER_YAML="$(realpath "$1")"
+      shift
+      ;;
+  esac
+done
+
 if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
-  echo "Usage: $0 <cluster.yaml>"
+  echo "Usage: $0 [-f|--force] <cluster.yaml>"
+  echo "  -f, --force    Skip confirmation prompt"
   echo "❌ Cluster file not found: $1"
   exit 1
 fi
@@ -16,12 +33,16 @@ BASE_DIR="$(dirname "$SCRIPT_DIR")"
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 VMF="${GOVC_FOLDER}/${CLUSTER_NAME}"
 
-echo "⚠ WARNING: This will delete all VMs AND generated configs for ${CLUSTER_NAME}"
-echo "Type DELETE to confirm:"
-read CONFIRM
-if [[ "$CONFIRM" != "DELETE" ]]; then
-  echo "Aborting."
-  exit 1
+if [[ "$FORCE_DELETE" == "false" ]]; then
+  echo "⚠ WARNING: This will delete all VMs AND generated configs for ${CLUSTER_NAME}"
+  echo "Type DELETE to confirm:"
+  read CONFIRM
+  if [[ "$CONFIRM" != "DELETE" ]]; then
+    echo "Aborting."
+    exit 1
+  fi
+else
+  echo "🗑 Force deleting cluster ${CLUSTER_NAME}..."
 fi
 
 # Find and delete VMs in the cluster folder

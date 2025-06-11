@@ -7,7 +7,11 @@ if [[ -z "$CLUSTER_NAME" ]]; then
   exit 1
 fi
 
-source "$(dirname "$0")/load-vcenter-env.sh"
+# Get the script directory and base directory correctly
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
+
+source "${SCRIPT_DIR}/load-vcenter-env.sh"
 
 # Check if password is available, prompt if not
 if [[ -z "${GOVC_PASSWORD:-}" ]]; then
@@ -23,7 +27,7 @@ if [[ -z "$GOVC_USERNAME" || -z "$GOVC_PASSWORD" ]]; then
   exit 1
 fi
 
-BASE_DIR="$(dirname "$(dirname "$0")")"
+# Use the correct path structure
 MANIFESTS_DIR="${BASE_DIR}/install-configs/${CLUSTER_NAME}/manifests"
 mkdir -p "${MANIFESTS_DIR}"
 
@@ -43,3 +47,4 @@ data:
 EOF
 
 echo "✅ vsphere-creds manifest generated for cluster ${CLUSTER_NAME}."
+echo "📍 Location: ${MANIFESTS_DIR}/vsphere-creds-secret.yaml"

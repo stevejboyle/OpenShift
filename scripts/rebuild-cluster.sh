@@ -40,7 +40,7 @@ export OPENSHIFT_INSTALL_EXPERIMENTAL_OVERRIDES='{ "disableTemplatedInstallConfi
 # -------------------------
 
 echo "🧹 Cleaning up any existing cluster..."
-"$SCRIPT_DIR/delete-cluster.sh" "$CLUSTER_YAML"
+"$SCRIPT_DIR/delete-cluster.sh" --force "$CLUSTER_YAML"
 
 echo "⚙ Generating install-config.yaml..."
 "$SCRIPT_DIR/generate-install-config.sh" "$CLUSTER_YAML"
@@ -53,11 +53,20 @@ cd "$SCRIPT_DIR"
 echo "🌐 Injecting static IP manifests..."
 "$SCRIPT_DIR/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
 
+echo "🔑 Injecting core user password manifests..."
+"$SCRIPT_DIR/generate-core-password-manifest.sh" "$CLUSTER_YAML"
+
 echo "🔐 Injecting vSphere creds secret..."
 "$SCRIPT_DIR/generate-vsphere-creds-manifest.sh" "$CLUSTER_NAME"
 
 echo "🔑 Injecting console-password manifest..."
 "$SCRIPT_DIR/generate-console-password-manifests.sh" "$CLUSTER_YAML"
+
+echo "📋 Backing up manifests for debugging..."
+BACKUP_DIR="${INSTALL_DIR}/manifests-backup-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+cp -r "${INSTALL_DIR}/manifests/"* "$BACKUP_DIR/"
+echo "✅ Manifests backed up to: $BACKUP_DIR"
 
 echo "🔥 Generating ignition-configs..."
 cd "$INSTALL_DIR"
@@ -68,3 +77,4 @@ echo "🚀 Deploying VMs..."
 "$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"
 
 echo "🎉 Full rebuild complete with static IPs!"
+echo "📋 Manifest backup available at: $BACKUP_DIR"
