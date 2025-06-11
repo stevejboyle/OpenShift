@@ -266,7 +266,7 @@ ssh core@192.168.42.30 'sudo journalctl -u bootkube.service'
 
 ## License
 
-[Add your license here]
+Use it or don't use it.   You don't need to pay me but don't complain either
 
 ## Support
 
