@@ -13,10 +13,25 @@ INSTALL_DIR="${BASE_DIR}/install-configs/${CLUSTER_NAME}"
 
 echo "🌐 Injecting static IPs directly into ignition files..."
 
-# Network configuration
-NETWORK_BASE="192.168.42"
-GATEWAY="${NETWORK_BASE}.1"
-DNS_SERVER="${NETWORK_BASE}.1"
+# Read network configuration from cluster YAML
+NETWORK_CIDR=$(yq -r '.network.cidr' "$CLUSTER_YAML")
+GATEWAY=$(yq -r '.network.gateway // "192.168.42.1"' "$CLUSTER_YAML")
+
+# Read DNS servers and format for NetworkManager
+DNS_SERVERS_ARRAY=($(yq -r '.network.dns_servers[]? // "8.8.8.8"' "$CLUSTER_YAML"))
+DNS_SERVERS_STRING=""
+for dns in "${DNS_SERVERS_ARRAY[@]}"; do
+  DNS_SERVERS_STRING="${DNS_SERVERS_STRING}${dns};"
+done
+
+# Extract network base from CIDR for IP assignment
+NETWORK_BASE=$(echo "$NETWORK_CIDR" | cut -d'.' -f1-3)
+
+echo "  Network configuration:"
+echo "    CIDR: $NETWORK_CIDR"
+echo "    Gateway: $GATEWAY"
+echo "    DNS Servers: ${DNS_SERVERS_STRING%?}"  # Remove trailing semicolon for display
+echo "    Network Base: $NETWORK_BASE"
 
 # Create NetworkManager connection file content
 create_nm_config() {
@@ -26,17 +41,19 @@ create_nm_config() {
 id=ens192
 type=ethernet
 interface-name=ens192
+autoconnect=true
 
 [ethernet]
 
 [ipv4]
-address1=${ip}/24,${GATEWAY}
-dns=${DNS_SERVER};
 method=manual
+address1=${ip}/24,${GATEWAY}
+dns=${DNS_SERVER};8.8.8.8;
+dns-search=
 
 [ipv6]
-addr-gen-mode=eui64
 method=auto
+addr-gen-mode=eui64
 EOF
 }
 
@@ -71,17 +88,19 @@ inject_network_config() {
 [connection]
 id=Wired connection 1
 type=ethernet
+autoconnect=true
 
 [ethernet]
 
 [ipv4]
-address1=${ip_address}/24,${GATEWAY}
-dns=${DNS_SERVER};
 method=manual
+address1=${ip_address}/24,${GATEWAY}
+dns=${DNS_SERVER};8.8.8.8;
+dns-search=
 
 [ipv6]
-addr-gen-mode=eui64
 method=auto
+addr-gen-mode=eui64
 EOF
 )
   generic_nm_config_b64=$(echo "$generic_nm_config" | base64 -w0)

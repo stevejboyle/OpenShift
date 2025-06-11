@@ -12,5 +12,7 @@ pullSecretFile: assets/pull-secret.json
 consolePasswordFile: assets/console-password.txt
 network:
   cidr: 192.168.42.0/24
-# Optional: Override default template path
-# rhcosTemplatePath: /Lab/vm/OpenShift/rhcos-template
+  gateway: 192.168.42.1
+  dns_servers:
+    - 192.168.1.97
+    - 192.168.1.98
