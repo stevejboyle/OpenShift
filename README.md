@@ -1,6 +1,6 @@
 # OpenShift vSphere Deployment Automation
 
-Automated deployment scripts for installing Red Hat OpenShift on VMware vSphere with static IP configuration and custom manifests.
+Automated deployment scripts for installing Red Hat OpenShift on VMware vSphere with static IP configuration, custom manifests, and robust cloud provider initialization handling.
 
 ## Features
 
@@ -10,7 +10,9 @@ Automated deployment scripts for installing Red Hat OpenShift on VMware vSphere 
 - ✅ **Shared RHCOS template** management
 - ✅ **DNS configuration** from cluster YAML
 - ✅ **Load balancer integration** (HAProxy)
+- ✅ **Cloud provider taint handling** for reliable bootstrap
 - ✅ **Backup and debugging** capabilities
+- ✅ **End-to-end deployment monitoring** with status reporting
 
 ## Prerequisites
 
@@ -69,9 +71,16 @@ cp clusters/ocp416.yaml.example clusters/ocp416.yaml
 
 ### 5. Deploy
 ```bash
-# Full automated deployment
+# Full automated deployment with cloud provider handling
 ./scripts/rebuild-cluster.sh clusters/ocp416.yaml
 ```
+
+The deployment script now includes:
+- **Automatic bootstrap monitoring** - waits for bootstrap completion
+- **Cloud provider taint detection and removal** - prevents scheduling failures
+- **Critical pod verification** - ensures etcd and cloud operators start properly
+- **Installation completion monitoring** - waits for full cluster readiness
+- **Comprehensive status reporting** - shows final cluster health
 
 ## Configuration
 
@@ -114,7 +123,8 @@ See [docs/haproxy-config.md](docs/haproxy-config.md) for complete HAProxy setup.
 
 | Script | Purpose |
 |--------|---------|
-| `rebuild-cluster.sh` | Main orchestration script - full cluster rebuild |
+| `rebuild-cluster.sh` | **Main orchestration script** - full cluster rebuild with cloud provider handling |
+| `fix-cloud-provider-taints.sh` | **NEW** - Detects and fixes cloud provider initialization issues |
 | `delete-cluster.sh` | Clean up VMs and generated configs |
 | `deploy-cluster.sh` | Generate manifests and ignition configs |
 | `deploy-vms.sh` | Deploy and configure VMs |
@@ -126,11 +136,58 @@ See [docs/haproxy-config.md](docs/haproxy-config.md) for complete HAProxy setup.
 | `inject-static-ips-into-ignition.sh` | Direct ignition file modification for static IPs |
 | `load-vcenter-env.sh` | Load vSphere environment variables |
 
+## Deployment Flow
+
+The enhanced `rebuild-cluster.sh` now follows this robust deployment flow:
+
+1. **Pre-deployment**: Clean up, generate configs, inject manifests
+2. **VM Deployment**: Deploy and configure VMs with static IPs
+3. **Bootstrap Monitoring**: Wait for bootstrap completion (up to 40 minutes)
+4. **🆕 Cloud Provider Handling**: Automatically detect and fix cloud provider initialization issues
+5. **🆕 Critical Pod Verification**: Ensure etcd-operator and cloud-credential-operator are running
+6. **Installation Completion**: Wait for full cluster installation
+7. **🆕 Status Reporting**: Show final cluster health and any issues
+
+### Cloud Provider Taint Handling
+
+The new `fix-cloud-provider-taints.sh` script automatically:
+- Detects `node.cloudprovider.kubernetes.io/uninitialized` taints that prevent pod scheduling
+- Removes these taints when cloud provider initialization is delayed
+- Verifies critical system pods can schedule and start
+- Provides detailed logging for troubleshooting
+
+This prevents the common vSphere deployment issue where pods remain in "Pending" state due to cloud provider initialization delays.
+
 ## Usage Examples
 
-### Deploy New Cluster
+### Deploy New Cluster (Enhanced)
 ```bash
+# Full deployment with automatic cloud provider handling
 ./scripts/rebuild-cluster.sh clusters/ocp416.yaml
+```
+
+The script will now show progress like:
+```
+🚀 Deploying VMs...
+🎉 VM deployment complete!
+⏳ Waiting for cluster bootstrap to complete...
+✅ Bootstrap completed successfully
+🔧 Checking and fixing cloud provider initialization issues...
+🔍 Waiting for nodes to be available...
+✅ Found 3 nodes
+⚠️  Found nodes with cloud provider initialization taints:
+🔧 Removing taints...
+✅ Successfully removed taint from master-0.ocp416.openshift.sboyle.internal
+⏳ Waiting for installation to complete...
+✅ Installation completed successfully!
+🏁 Final cluster status:
+✅ Cluster API is accessible
+```
+
+### Fix Cloud Provider Issues (Manual)
+```bash
+# If you need to manually fix cloud provider issues on existing cluster
+./scripts/fix-cloud-provider-taints.sh install-configs/ocp416
 ```
 
 ### Delete Cluster (with confirmation)
@@ -150,22 +207,29 @@ See [docs/haproxy-config.md](docs/haproxy-config.md) for complete HAProxy setup.
 
 ## Monitoring Installation
 
-### Bootstrap Progress
+### Automated Monitoring (Built-in)
+The `rebuild-cluster.sh` script now includes comprehensive monitoring:
+- Bootstrap completion detection
+- Cloud provider issue detection and fixing
+- Critical pod readiness verification
+- Installation completion monitoring
+- Final cluster status reporting
+
+### Manual Monitoring
 ```bash
 cd install-configs/ocp416
+
+# Watch bootstrap progress
 openshift-install wait-for bootstrap-complete --log-level debug
-```
 
-### Installation Completion
-```bash
+# Watch installation completion
 openshift-install wait-for install-complete --log-level debug
-```
 
-### Access Cluster
-```bash
-export KUBECONFIG=install-configs/ocp416/auth/kubeconfig
+# Check cluster status
+export KUBECONFIG=auth/kubeconfig
 oc get nodes
 oc get co  # Check cluster operators
+oc get pods --all-namespaces | grep -v Running
 ```
 
 ## Console Access
@@ -193,7 +257,20 @@ ssh core@192.168.42.30
 
 ## Troubleshooting
 
+### Enhanced Automatic Troubleshooting
+
+The deployment scripts now automatically handle:
+- **Cloud provider initialization delays** - automatically removes blocking taints
+- **Pod scheduling failures** - verifies critical pods can start
+- **Bootstrap timeouts** - continues with installation after fixing issues
+- **Installation monitoring** - provides clear status and next steps
+
 ### Common Issues
+
+**🆕 Cloud Provider Initialization Issues (Automatically Fixed):**
+- **Symptoms**: Pods stuck in "Pending" with `node.cloudprovider.kubernetes.io/uninitialized` taints
+- **Automatic Fix**: The script detects and removes these taints
+- **Manual Fix**: Run `./scripts/fix-cloud-provider-taints.sh install-configs/ocp416`
 
 **VMs not getting static IPs:**
 - Check manifest backup in `install-configs/ocp416/manifests-backup-*/`
@@ -201,9 +278,9 @@ ssh core@192.168.42.30
 - Check NetworkManager logs: `sudo journalctl -u NetworkManager`
 
 **Bootstrap timeout:**
+- The script now handles this automatically by proceeding to cloud provider checks
 - Check HAProxy configuration for port 22623
 - Verify masters can reach bootstrap: `curl -k https://192.168.42.30:22623/config/master`
-- Check master kubelet logs: `sudo journalctl -u kubelet.service`
 
 **DNS resolution issues:**
 - Test DNS from VMs: `nslookup quay.io`
@@ -221,8 +298,26 @@ oc get nodes
 oc get csr
 oc get co
 
+# Check for taint issues
+oc get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
+
+# Check critical pods
+oc get pods -n openshift-etcd-operator
+oc get pods -n openshift-cloud-credential-operator
+
 # Check logs
 ssh core@192.168.42.30 'sudo journalctl -u bootkube.service'
+```
+
+### Script Debugging
+
+The enhanced scripts provide detailed logging:
+```bash
+# Check recent deployment logs
+tail -f /tmp/openshift-install-*.log
+
+# Check cloud provider fix logs
+./scripts/fix-cloud-provider-taints.sh install-configs/ocp416
 ```
 
 ## File Structure
@@ -236,7 +331,8 @@ ssh core@192.168.42.30 'sudo journalctl -u bootkube.service'
 ├── clusters/
 │   └── ocp416.yaml
 ├── scripts/
-│   ├── rebuild-cluster.sh
+│   ├── rebuild-cluster.sh          # Enhanced with cloud provider handling
+│   ├── fix-cloud-provider-taints.sh # NEW - Cloud provider issue resolution
 │   ├── delete-cluster.sh
 │   ├── deploy-cluster.sh
 │   ├── deploy-vms.sh
@@ -250,6 +346,26 @@ ssh core@192.168.42.30 'sudo journalctl -u bootkube.service'
 └── README.md
 ```
 
+## What's New in v2.0
+
+### 🆕 Enhanced Deployment Reliability
+- **Automatic cloud provider taint detection and removal**
+- **Critical pod readiness verification**
+- **End-to-end installation monitoring**
+- **Comprehensive error handling and recovery**
+
+### 🆕 Better User Experience
+- **Real-time progress reporting with emojis**
+- **Automatic issue detection and resolution**
+- **Clear status reporting at each stage**
+- **Detailed final cluster health summary**
+
+### 🆕 Robust Error Handling
+- **Graceful timeout handling**
+- **Automatic retry mechanisms**
+- **Detailed error reporting and debugging information**
+- **Continuation of deployment after recoverable errors**
+
 ## Security Notes
 
 - Never commit sensitive files (credentials, pull secrets, private keys)
@@ -261,15 +377,17 @@ ssh core@192.168.42.30 'sudo journalctl -u bootkube.service'
 
 1. Fork the repository
 2. Create a feature branch
-3. Test changes thoroughly
+3. Test changes thoroughly with various vSphere environments
 4. Submit a pull request with detailed description
+5. Include any updates to the cloud provider handling logic
 
 ## License
 
-Use it or don't use it.   You don't need to pay me but don't complain either
+Use it or don't use it. You don't need to pay me but don't complain either
 
 ## Support
 
 - [Red Hat OpenShift Documentation](https://docs.openshift.com/)
 - [VMware vSphere Documentation](https://docs.vmware.com/en/VMware-vSphere/)
 - [OpenShift on vSphere Guide](https://docs.openshift.com/container-platform/4.16/installing/installing_vsphere/)
+- **Enhanced troubleshooting**: Check the automatic cloud provider handling in `fix-cloud-provider-taints.sh`
