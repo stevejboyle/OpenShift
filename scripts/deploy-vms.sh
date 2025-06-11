@@ -11,8 +11,6 @@ fi
 SCRIPTS="$(dirname "$0")"
 source "${SCRIPTS}/load-vcenter-env.sh"
 BASE_DIR="$(dirname "$SCRIPTS")"
-
-# Resolve OVA path relative to base directory
 OVA="${BASE_DIR}/assets/rhcos-4.16.36-x86_64-vmware.x86_64.ova"
 
 # Get cluster configuration
@@ -35,7 +33,7 @@ if ! govc ls "$TEMPLATE_PATH" &>/dev/null; then
   govc vm.markastemplate "$TEMPLATE_PATH"
 fi
 
-# Create cluster VM folder once (before VM creation loop)
+# Create cluster VM folder once at the beginning
 echo "📁 Ensuring cluster VM folder exists: $VMF"
 if ! govc ls "$VMF" &>/dev/null; then
   govc folder.create "$VMF"
@@ -50,7 +48,7 @@ VMS=("${CLUSTER_NAME}-bootstrap" "${CLUSTER_NAME}-master-0" "${CLUSTER_NAME}-mas
 # Clone & configure
 for vm in "${VMS[@]}"; do
   echo "🚀 Deploying $vm..."
-  # Clone VM (folder already exists, no need to create again)
+  # Folder already exists, no need to create again
   govc vm.clone -vm "$TEMPLATE_PATH" -on=false -folder "$VMF" "$vm"
   
   # Configure network (may need to replace existing network)

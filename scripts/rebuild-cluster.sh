@@ -68,6 +68,9 @@ mkdir -p "$BACKUP_DIR"
 cp -r "${INSTALL_DIR}/manifests/"* "$BACKUP_DIR/"
 echo "✅ Manifests backed up to: $BACKUP_DIR"
 
+echo "🔍 Custom manifests that will be applied:"
+ls -la "${INSTALL_DIR}/manifests/99-"* "${INSTALL_DIR}/manifests/vsphere-"* 2>/dev/null || echo "   No custom manifests found"
+
 echo "🔥 Generating ignition-configs..."
 cd "$INSTALL_DIR"
 openshift-install create ignition-configs
@@ -78,3 +81,12 @@ echo "🚀 Deploying VMs..."
 
 echo "🎉 Full rebuild complete with static IPs!"
 echo "📋 Manifest backup available at: $BACKUP_DIR"
+
+echo ""
+echo "🔍 Verifying static IP injection..."
+if cat "${INSTALL_DIR}/bootstrap.ign" | jq '.storage.files[] | select(.path | contains("system-connections"))' | grep -q "path"; then
+  echo "✅ Static IP configuration found in bootstrap ignition file"
+else
+  echo "❌ Static IP configuration NOT found in bootstrap ignition file"
+  echo "🔍 Check manifest backup at: $BACKUP_DIR"
+fi
