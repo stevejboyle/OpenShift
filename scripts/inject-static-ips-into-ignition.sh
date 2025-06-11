@@ -11,6 +11,10 @@ CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 BASE_DIR="$(dirname "$(dirname "$0")")"
 INSTALL_DIR="${BASE_DIR}/install-configs/${CLUSTER_NAME}"
 
+# Read additional config from cluster YAML
+CLUSTER_NAME=$(yq -r '.clusterName' "$CLUSTER_YAML")
+BASE_DOMAIN=$(yq -r '.baseDomain' "$CLUSTER_YAML")
+
 echo "🌐 Injecting static IPs directly into ignition files..."
 
 # Read network configuration from cluster YAML
@@ -65,23 +69,51 @@ inject_network_config() {
   
   echo "  Injecting ${ip_address} into ${role} ignition..."
   
+  # Determine hostname based on role and IP
+  local hostname
+  if [[ "$role" == "bootstrap" ]]; then
+    hostname="bootstrap.${CLUSTER_NAME}.${BASE_DOMAIN}"
+  else
+    # Extract last octet for master naming
+    local last_octet="${ip_address##*.}"
+    local master_num=$((last_octet - 31))  # 31->0, 32->1, 33->2
+    hostname="master-${master_num}.${CLUSTER_NAME}.${BASE_DOMAIN}"
+  fi
+  
+  echo "    Setting hostname: $hostname"
+  
   # Create the NetworkManager config
   nm_config=$(create_nm_config "$ip_address")
   nm_config_b64=$(echo "$nm_config" | base64 -w0)
   
+  # Create hostname file content
+  hostname_content=$(echo "$hostname")
+  hostname_b64=$(echo "$hostname_content" | base64 -w0)
+  
   # Create temporary file with updated ignition
   tmp_file=$(mktemp)
   
-  # Add the network configuration to the ignition file
+  # Add both network configuration and hostname to the ignition file
   jq --arg content "data:text/plain;charset=utf-8;base64,$nm_config_b64" \
-     '.storage.files += [{
-       "path": "/etc/NetworkManager/system-connections/ens192.nmconnection",
-       "mode": 384,
-       "overwrite": true,
-       "contents": {
-         "source": $content
+     --arg hostname_content "data:text/plain;charset=utf-8;base64,$hostname_b64" \
+     '.storage.files += [
+       {
+         "path": "/etc/NetworkManager/system-connections/ens192.nmconnection",
+         "mode": 384,
+         "overwrite": true,
+         "contents": {
+           "source": $content
+         }
+       },
+       {
+         "path": "/etc/hostname",
+         "mode": 420,
+         "overwrite": true,
+         "contents": {
+           "source": $hostname_content
+         }
        }
-     }]' "$ignition_file" > "$tmp_file"
+     ]' "$ignition_file" > "$tmp_file"
   
   # Also add a generic ethernet connection as backup
   generic_nm_config=$(cat <<EOF
