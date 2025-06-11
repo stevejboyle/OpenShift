@@ -93,3 +93,4 @@ else
   echo "❌ Static IP configuration NOT found in bootstrap ignition file"
   echo "🔍 Check manifest backup at: $BACKUP_DIR"
 fi
+

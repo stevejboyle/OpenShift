@@ -8,12 +8,9 @@ if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
 fi
 
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
+BASE_DOMAIN="$(yq '.baseDomain' "$CLUSTER_YAML")"
 BASE_DIR="$(dirname "$(dirname "$0")")"
 INSTALL_DIR="${BASE_DIR}/install-configs/${CLUSTER_NAME}"
-
-# Read additional config from cluster YAML
-CLUSTER_NAME=$(yq -r '.clusterName' "$CLUSTER_YAML")
-BASE_DOMAIN=$(yq -r '.baseDomain' "$CLUSTER_YAML")
 
 echo "🌐 Injecting static IPs directly into ignition files..."
 
@@ -21,14 +18,18 @@ echo "🌐 Injecting static IPs directly into ignition files..."
 NETWORK_CIDR=$(yq -r '.network.cidr' "$CLUSTER_YAML")
 GATEWAY=$(yq -r '.network.gateway // "192.168.42.1"' "$CLUSTER_YAML")
 
-# Read DNS servers and format for NetworkManager
-DNS_SERVERS_ARRAY=($(yq -r '.network.dns_servers[]? // "8.8.8.8"' "$CLUSTER_YAML"))
-DNS_SERVERS_STRING=""
-for dns in "${DNS_SERVERS_ARRAY[@]}"; do
-  DNS_SERVERS_STRING="${DNS_SERVERS_STRING}${dns};"
-done
-# Remove trailing semicolon
-DNS_SERVERS_STRING="${DNS_SERVERS_STRING%?}"
+# Read DNS servers with a more robust approach
+DNS_SERVERS_STRING=$(yq -r '.network.dns_servers | join(";")' "$CLUSTER_YAML")
+
+# Debug: Show what we actually got
+echo "  Raw DNS string from yq: '$DNS_SERVERS_STRING'"
+echo "  Length: ${#DNS_SERVERS_STRING}"
+
+# Fallback if no DNS servers defined
+if [[ -z "$DNS_SERVERS_STRING" || "$DNS_SERVERS_STRING" == "null" ]]; then
+  DNS_SERVERS_STRING="8.8.8.8;1.1.1.1"
+  echo "  Using fallback DNS: '$DNS_SERVERS_STRING'"
+fi
 
 # Extract network base from CIDR for IP assignment
 NETWORK_BASE=$(echo "$NETWORK_CIDR" | cut -d'.' -f1-3)
@@ -36,7 +37,7 @@ NETWORK_BASE=$(echo "$NETWORK_CIDR" | cut -d'.' -f1-3)
 echo "  Network configuration:"
 echo "    CIDR: $NETWORK_CIDR"
 echo "    Gateway: $GATEWAY"
-echo "    DNS Servers: ${DNS_SERVERS_STRING%?}"  # Remove trailing semicolon for display
+echo "    DNS Servers: $DNS_SERVERS_STRING"
 echo "    Network Base: $NETWORK_BASE"
 
 # Create NetworkManager connection file content
@@ -54,7 +55,7 @@ autoconnect=true
 [ipv4]
 method=manual
 address1=${ip}/24,${GATEWAY}
-dns=${DNS_SERVER};8.8.8.8;
+dns=${DNS_SERVERS_STRING}
 dns-search=
 
 [ipv6]
@@ -70,6 +71,13 @@ inject_network_config() {
   local role=$3
   
   echo "  Injecting ${ip_address} into ${role} ignition..."
+  echo "  File: $ignition_file"
+  
+  # Check if file exists
+  if [[ ! -f "$ignition_file" ]]; then
+    echo "  ERROR: Ignition file not found: $ignition_file"
+    return 1
+  fi
   
   # Determine hostname based on role and IP
   local hostname
@@ -83,9 +91,13 @@ inject_network_config() {
   fi
   
   echo "    Setting hostname: $hostname"
+  echo "    Using DNS: $DNS_SERVERS_STRING"
   
   # Create the NetworkManager config
   nm_config=$(create_nm_config "$ip_address")
+  echo "    Generated NetworkManager config:"
+  echo "$nm_config" | sed 's/^/      /'
+  
   nm_config_b64=$(echo "$nm_config" | base64 -w0)
   
   # Create hostname file content
@@ -94,6 +106,8 @@ inject_network_config() {
   
   # Create temporary file with updated ignition
   tmp_file=$(mktemp)
+  
+  echo "    Updating ignition file..."
   
   # Add both network configuration and hostname to the ignition file
   jq --arg content "data:text/plain;charset=utf-8;base64,$nm_config_b64" \
@@ -129,7 +143,7 @@ autoconnect=true
 [ipv4]
 method=manual
 address1=${ip_address}/24,${GATEWAY}
-dns=${DNS_SERVER};8.8.8.8;
+dns=${DNS_SERVERS_STRING}
 dns-search=
 
 [ipv6]
@@ -178,7 +192,6 @@ echo "✅ Static IP configuration injected into ignition files:"
 echo "   Bootstrap: ${NETWORK_BASE}.30"
 echo "   Masters:   ${NETWORK_BASE}.31"
 
-# Verify injection worked
 echo ""
 echo "🔍 Verifying bootstrap ignition contains NetworkManager config..."
 if cat "${INSTALL_DIR}/bootstrap.ign" | jq '.storage.files[] | select(.path | contains("system-connections"))' | grep -q "path"; then
