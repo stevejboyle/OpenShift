@@ -50,6 +50,9 @@ cd "$INSTALL_DIR"
 openshift-install create manifests
 cd "$SCRIPT_DIR"
 
+echo "🌐 Injecting static IP manifests..."
+"$SCRIPT_DIR/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
+
 echo "🔐 Injecting vSphere creds secret..."
 "$SCRIPT_DIR/generate-vsphere-creds-manifest.sh" "$CLUSTER_NAME"
 
@@ -64,4 +67,4 @@ cd "$SCRIPT_DIR"
 echo "🚀 Deploying VMs..."
 "$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"
 
-echo "🎉 Full rebuild complete!"
+echo "🎉 Full rebuild complete with static IPs!"

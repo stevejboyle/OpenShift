@@ -35,6 +35,9 @@ NETWORK_CIDR=$(yq -r '.network.cidr'  "$CLUSTER_YAML")
 INSTALL_DIR="${BASE_DIR}/install-configs/${CN}"
 mkdir -p "$INSTALL_DIR"
 
+# Use placeholder for password - it will be replaced by environment variables during openshift-install
+PLACEHOLDER_PASSWORD="WILL_BE_SET_BY_ENVIRONMENT"
+
 # Emit clean install-config.yaml
 cat > "${INSTALL_DIR}/install-config.yaml" <<EOF
 apiVersion: v1
@@ -52,7 +55,7 @@ platform:
     vcenters:
     - server: ${VC_SERVER}
       user: ${GOVC_USERNAME}
-      password: ${GOVC_PASSWORD}
+      password: ${PLACEHOLDER_PASSWORD}
       datacenters:
       - ${VC_DC}
     failureDomains:
@@ -76,3 +79,4 @@ sshKey: |
 EOF
 
 echo "✅ install-config.yaml generated at: ${INSTALL_DIR}/install-config.yaml"
+echo "⚠️  Password placeholder will be replaced by VSPHERE_PASSWORD environment variable"

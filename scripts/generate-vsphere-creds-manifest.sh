@@ -9,6 +9,14 @@ fi
 
 source "$(dirname "$0")/load-vcenter-env.sh"
 
+# Check if password is available, prompt if not
+if [[ -z "${GOVC_PASSWORD:-}" ]]; then
+  echo -n "🔐 GOVC_PASSWORD not set. Enter vSphere password for $GOVC_USERNAME: "
+  read -s GOVC_PASSWORD
+  echo
+  export GOVC_PASSWORD
+fi
+
 # Validate that credentials are loaded
 if [[ -z "$GOVC_USERNAME" || -z "$GOVC_PASSWORD" ]]; then
   echo "❌ GOVC credentials not loaded properly"
