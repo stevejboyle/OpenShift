@@ -27,6 +27,8 @@ DNS_SERVERS_STRING=""
 for dns in "${DNS_SERVERS_ARRAY[@]}"; do
   DNS_SERVERS_STRING="${DNS_SERVERS_STRING}${dns};"
 done
+# Remove trailing semicolon
+DNS_SERVERS_STRING="${DNS_SERVERS_STRING%?}"
 
 # Extract network base from CIDR for IP assignment
 NETWORK_BASE=$(echo "$NETWORK_CIDR" | cut -d'.' -f1-3)
