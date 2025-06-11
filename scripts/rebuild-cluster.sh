@@ -76,6 +76,9 @@ cd "$INSTALL_DIR"
 openshift-install create ignition-configs
 cd "$SCRIPT_DIR"
 
+echo "🌐 Injecting static IPs directly into ignition files..."
+"$SCRIPT_DIR/inject-static-ips-into-ignition.sh" "$CLUSTER_YAML"
+
 echo "🚀 Deploying VMs..."
 "$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"
 

@@ -33,25 +33,17 @@ if ! govc ls "$TEMPLATE_PATH" &>/dev/null; then
   govc vm.markastemplate "$TEMPLATE_PATH"
 fi
 
-# Create cluster VM folder once at the beginning
-echo "📁 Ensuring cluster VM folder exists: $VMF"
-if ! govc ls "$VMF" &>/dev/null; then
-  govc folder.create "$VMF"
-  echo "✅ Created VM folder: $VMF"
-else
-  echo "✅ VM folder already exists: $VMF"
-fi
-
 # Define VMs to create (adjust based on your cluster needs)
 VMS=("${CLUSTER_NAME}-bootstrap" "${CLUSTER_NAME}-master-0" "${CLUSTER_NAME}-master-1" "${CLUSTER_NAME}-master-2" "${CLUSTER_NAME}-worker-0" "${CLUSTER_NAME}-worker-1")
 
 # Clone & configure
 for vm in "${VMS[@]}"; do
   echo "🚀 Deploying $vm..."
-  # Folder already exists, no need to create again
+  # Create folder for each VM (will warn if exists, but works)
+  govc folder.create "$VMF" || true
   govc vm.clone -vm "$TEMPLATE_PATH" -on=false -folder "$VMF" "$vm"
   
-  # Configure network (may need to replace existing network)
+  # Configure network
   govc vm.network.change -vm "$vm" -net "$VMN" ethernet-0
   
   # Determine ignition file based on VM type
