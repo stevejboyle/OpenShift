@@ -82,6 +82,59 @@ echo "🌐 Injecting static IPs directly into ignition files..."
 echo "🚀 Deploying VMs..."
 "$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"
 
+echo "🎉 VM deployment complete!"
+
+# NEW: Wait for cluster bootstrap and handle cloud provider taints
+echo ""
+echo "⏳ Waiting for cluster bootstrap to complete..."
+cd "$INSTALL_DIR"
+echo "   Starting bootstrap wait (this may take 20-30 minutes)..."
+
+# Run openshift-install wait-for bootstrap-complete in background to capture its exit status
+if timeout 2400 openshift-install wait-for bootstrap-complete --log-level=info; then
+  echo "✅ Bootstrap completed successfully"
+else
+  BOOTSTRAP_EXIT_CODE=$?
+  if [ $BOOTSTRAP_EXIT_CODE -eq 124 ]; then
+    echo "⚠️  Bootstrap wait timed out after 40 minutes, but this may be due to cloud provider initialization issues"
+    echo "   Proceeding to check and fix cloud provider taints..."
+  else
+    echo "❌ Bootstrap failed with exit code $BOOTSTRAP_EXIT_CODE"
+    echo "   Still attempting to check and fix cloud provider taints..."
+  fi
+fi
+
+cd "$SCRIPT_DIR"
+
+# NEW: Check and fix cloud provider taints
+echo ""
+echo "🔧 Checking and fixing cloud provider initialization issues..."
+if "$SCRIPT_DIR/fix-cloud-provider-taints.sh" "$INSTALL_DIR"; then
+  echo "✅ Cloud provider taint check completed successfully"
+else
+  echo "⚠️  Cloud provider taint check had issues, but continuing..."
+fi
+
+# NEW: Wait for install completion after fixing taints
+echo ""
+echo "⏳ Waiting for installation to complete..."
+cd "$INSTALL_DIR"
+
+if timeout 1800 openshift-install wait-for install-complete --log-level=info; then
+  echo "✅ Installation completed successfully!"
+else
+  INSTALL_EXIT_CODE=$?
+  if [ $INSTALL_EXIT_CODE -eq 124 ]; then
+    echo "⚠️  Installation wait timed out, but cluster may still be completing..."
+    echo "   Check cluster status manually with: oc get clusteroperators"
+  else
+    echo "❌ Installation failed with exit code $INSTALL_EXIT_CODE"
+  fi
+fi
+
+cd "$SCRIPT_DIR"
+
+echo ""
 echo "🎉 Full rebuild complete with static IPs!"
 echo "📋 Manifest backup available at: $BACKUP_DIR"
 
@@ -94,3 +147,17 @@ else
   echo "🔍 Check manifest backup at: $BACKUP_DIR"
 fi
 
+# NEW: Show final cluster status
+echo ""
+echo "🏁 Final cluster status:"
+export KUBECONFIG="$INSTALL_DIR/auth/kubeconfig"
+if oc cluster-info >/dev/null 2>&1; then
+  echo "✅ Cluster API is accessible"
+  echo "   Nodes:"
+  oc get nodes -o wide 2>/dev/null || echo "   Unable to get node status"
+  echo "   Cluster operators (showing any not ready):"
+  oc get clusteroperators 2>/dev/null | head -1  # Header
+  oc get clusteroperators 2>/dev/null | grep -v "True.*False.*False" | tail -n +2 || echo "   All cluster operators appear ready"
+else
+  echo "⚠️  Cluster API not accessible - check kubeconfig: $INSTALL_DIR/auth/kubeconfig"
+fi
