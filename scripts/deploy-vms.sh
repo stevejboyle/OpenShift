@@ -46,11 +46,15 @@ for vm in "${VMS[@]}"; do
   # Configure network
   govc vm.network.change -vm "$vm" -net "$VMN" ethernet-0
   
-  # Determine ignition file based on VM type
+  # Determine ignition file based on VM type  
   if [[ "$vm" == *"bootstrap"* ]]; then
     ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/bootstrap.ign"
-  elif [[ "$vm" == *"master"* ]]; then
-    ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/master.ign"
+  elif [[ "$vm" == *"master-0"* ]]; then
+    ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/master-0.ign"
+  elif [[ "$vm" == *"master-1"* ]]; then
+    ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/master-1.ign" 
+  elif [[ "$vm" == *"master-2"* ]]; then
+    ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/master-2.ign"
   else
     ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/worker.ign"
   fi

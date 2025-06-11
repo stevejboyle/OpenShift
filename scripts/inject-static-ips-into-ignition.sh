@@ -157,8 +157,19 @@ if [[ -f "${INSTALL_DIR}/bootstrap.ign" ]]; then
   inject_network_config "${INSTALL_DIR}/bootstrap.ign" "${NETWORK_BASE}.30" "bootstrap"
 fi
 
+# For masters, we need to create individual ignition files with unique IPs
 if [[ -f "${INSTALL_DIR}/master.ign" ]]; then
-  inject_network_config "${INSTALL_DIR}/master.ign" "${NETWORK_BASE}.31" "master"
+  # Create individual master ignition files
+  cp "${INSTALL_DIR}/master.ign" "${INSTALL_DIR}/master-0.ign"
+  cp "${INSTALL_DIR}/master.ign" "${INSTALL_DIR}/master-1.ign" 
+  cp "${INSTALL_DIR}/master.ign" "${INSTALL_DIR}/master-2.ign"
+  
+  # Inject unique IPs into each master ignition file
+  inject_network_config "${INSTALL_DIR}/master-0.ign" "${NETWORK_BASE}.31" "master-0"
+  inject_network_config "${INSTALL_DIR}/master-1.ign" "${NETWORK_BASE}.32" "master-1"
+  inject_network_config "${INSTALL_DIR}/master-2.ign" "${NETWORK_BASE}.33" "master-2"
+  
+  echo "✅ Created individual master ignition files with unique IPs"
 fi
 
 echo "✅ Static IP configuration injected into ignition files:"
