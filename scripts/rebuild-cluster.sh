@@ -90,18 +90,43 @@ echo "⏳ Waiting for cluster bootstrap to complete..."
 cd "$INSTALL_DIR"
 echo "   Starting bootstrap wait (this may take 20-30 minutes)..."
 
-# Run openshift-install wait-for bootstrap-complete in background to capture its exit status
-if timeout 2400 openshift-install wait-for bootstrap-complete --log-level=info; then
-  echo "✅ Bootstrap completed successfully"
-else
-  BOOTSTRAP_EXIT_CODE=$?
-  if [ $BOOTSTRAP_EXIT_CODE -eq 124 ]; then
-    echo "⚠️  Bootstrap wait timed out after 40 minutes, but this may be due to cloud provider initialization issues"
-    echo "   Proceeding to check and fix cloud provider taints..."
+# Run openshift-install wait-for bootstrap-complete with our own timeout handling
+echo "   This may take up to 40 minutes..."
+BOOTSTRAP_PID=""
+openshift-install wait-for bootstrap-complete --log-level=info &
+BOOTSTRAP_PID=$!
+
+# Wait for bootstrap with timeout (40 minutes = 2400 seconds)
+TIMEOUT_SECONDS=2400
+ELAPSED=0
+BOOTSTRAP_EXIT_CODE=""
+
+while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
+  if ! kill -0 $BOOTSTRAP_PID 2>/dev/null; then
+    # Process has finished
+    wait $BOOTSTRAP_PID
+    BOOTSTRAP_EXIT_CODE=$?
+    break
+  fi
+  sleep 30
+  ELAPSED=$((ELAPSED + 30))
+  echo "   Bootstrap wait progress: $ELAPSED/$TIMEOUT_SECONDS seconds..."
+done
+
+# Handle the result
+if [ -n "$BOOTSTRAP_EXIT_CODE" ]; then
+  if [ $BOOTSTRAP_EXIT_CODE -eq 0 ]; then
+    echo "✅ Bootstrap completed successfully"
   else
     echo "❌ Bootstrap failed with exit code $BOOTSTRAP_EXIT_CODE"
     echo "   Still attempting to check and fix cloud provider taints..."
   fi
+else
+  # Timed out - kill the process
+  echo "⚠️  Bootstrap wait timed out after 40 minutes, but this may be due to cloud provider initialization issues"
+  echo "   Proceeding to check and fix cloud provider taints..."
+  kill $BOOTSTRAP_PID 2>/dev/null || true
+  wait $BOOTSTRAP_PID 2>/dev/null || true
 fi
 
 cd "$SCRIPT_DIR"
@@ -120,16 +145,41 @@ echo ""
 echo "⏳ Waiting for installation to complete..."
 cd "$INSTALL_DIR"
 
-if timeout 1800 openshift-install wait-for install-complete --log-level=info; then
-  echo "✅ Installation completed successfully!"
-else
-  INSTALL_EXIT_CODE=$?
-  if [ $INSTALL_EXIT_CODE -eq 124 ]; then
-    echo "⚠️  Installation wait timed out, but cluster may still be completing..."
-    echo "   Check cluster status manually with: oc get clusteroperators"
+# Wait for install completion with our own timeout handling
+INSTALL_PID=""
+openshift-install wait-for install-complete --log-level=info &
+INSTALL_PID=$!
+
+# Wait for install with timeout (30 minutes = 1800 seconds)
+TIMEOUT_SECONDS=1800
+ELAPSED=0
+INSTALL_EXIT_CODE=""
+
+while [ $ELAPSED -lt $TIMEOUT_SECONDS ]; do
+  if ! kill -0 $INSTALL_PID 2>/dev/null; then
+    # Process has finished
+    wait $INSTALL_PID
+    INSTALL_EXIT_CODE=$?
+    break
+  fi
+  sleep 30
+  ELAPSED=$((ELAPSED + 30))
+  echo "   Install wait progress: $ELAPSED/$TIMEOUT_SECONDS seconds..."
+done
+
+# Handle the result
+if [ -n "$INSTALL_EXIT_CODE" ]; then
+  if [ $INSTALL_EXIT_CODE -eq 0 ]; then
+    echo "✅ Installation completed successfully!"
   else
     echo "❌ Installation failed with exit code $INSTALL_EXIT_CODE"
   fi
+else
+  # Timed out - kill the process
+  echo "⚠️  Installation wait timed out, but cluster may still be completing..."
+  echo "   Check cluster status manually with: oc get clusteroperators"
+  kill $INSTALL_PID 2>/dev/null || true
+  wait $INSTALL_PID 2>/dev/null || true
 fi
 
 cd "$SCRIPT_DIR"
