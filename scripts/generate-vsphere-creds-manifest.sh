@@ -34,6 +34,9 @@ mkdir -p "${MANIFESTS_DIR}"
 u=$(echo -n "$GOVC_USERNAME" | base64 -w0)
 p=$(echo -n "$GOVC_PASSWORD" | base64 -w0)
 
+echo "🔐 Creating vSphere credentials secrets..."
+
+# 1. Create the primary secret (for UPI machine manifests)
 cat > "${MANIFESTS_DIR}/vsphere-creds-secret.yaml" <<EOF
 apiVersion: v1
 kind: Secret
@@ -46,5 +49,54 @@ data:
   password: ${p}
 EOF
 
-echo "✅ vsphere-creds manifest generated for cluster ${CLUSTER_NAME}."
-echo "📍 Location: ${MANIFESTS_DIR}/vsphere-creds-secret.yaml"
+# 2. Create the cloud-credential-operator expected secret format
+cat > "${MANIFESTS_DIR}/vsphere-cloud-credentials-secret.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsphere-cloud-credentials
+  namespace: openshift-machine-api
+type: Opaque
+data:
+  ${GOVC_URL#https://}.username: ${u}
+  ${GOVC_URL#https://}.password: ${p}
+EOF
+
+# 3. Create the source secret for cloud-credential-operator
+cat > "${MANIFESTS_DIR}/vsphere-source-credentials-secret.yaml" <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsphere-cloud-credentials
+  namespace: openshift-cloud-credential-operator
+type: Opaque
+data:
+  ${GOVC_URL#https://}.username: ${u}
+  ${GOVC_URL#https://}.password: ${p}
+EOF
+
+# 4. Override the cloud-credential-operator CredentialsRequest to use manual mode
+cat > "${MANIFESTS_DIR}/99-disable-vsphere-credentials-request.yaml" <<EOF
+apiVersion: cloudcredential.openshift.io/v1
+kind: CredentialsRequest
+metadata:
+  name: openshift-machine-api-vsphere
+  namespace: openshift-cloud-credential-operator
+  annotations:
+    cloudcredential.openshift.io/mode: manual
+spec:
+  providerSpec:
+    apiVersion: cloudcredential.openshift.io/v1
+    kind: VSphereProviderSpec
+  secretRef:
+    name: vsphere-cloud-credentials
+    namespace: openshift-machine-api
+EOF
+
+echo "✅ All vSphere credentials manifests generated for cluster ${CLUSTER_NAME}:"
+echo "📍 Primary secret: ${MANIFESTS_DIR}/vsphere-creds-secret.yaml"
+echo "📍 Cloud-credential secret: ${MANIFESTS_DIR}/vsphere-cloud-credentials-secret.yaml" 
+echo "📍 Source secret: ${MANIFESTS_DIR}/vsphere-source-credentials-secret.yaml"
+echo "📍 Manual mode override: ${MANIFESTS_DIR}/99-disable-vsphere-credentials-request.yaml"
+echo ""
+echo "🎯 This covers all possible secret name references and disables automatic credential management."
