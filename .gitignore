@@ -4,6 +4,7 @@ auth/
 metadata.json
 *.ign
 *.backup
+*.openshift_install*
 
 # Sensitive Configuration Files
 govc.env
