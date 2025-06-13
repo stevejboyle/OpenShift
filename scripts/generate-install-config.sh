@@ -16,6 +16,14 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/load-vcenter-env.sh"
 
+# NEW: Ensure password is available
+if [[ -z "${GOVC_PASSWORD:-}" ]]; then
+  echo -n "🔐 GOVC_PASSWORD not set. Enter vSphere password for $GOVC_USERNAME: "
+  read -s GOVC_PASSWORD
+  echo
+  export GOVC_PASSWORD
+fi
+
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
 # Read cluster settings
@@ -35,9 +43,7 @@ NETWORK_CIDR=$(yq -r '.network.cidr'  "$CLUSTER_YAML")
 INSTALL_DIR="${BASE_DIR}/install-configs/${CN}"
 mkdir -p "$INSTALL_DIR"
 
-# Use placeholder for password - it will be replaced by environment variables during openshift-install
-PLACEHOLDER_PASSWORD="WILL_BE_SET_BY_ENVIRONMENT"
-
+# FIXED: Use actual password instead of placeholder
 # Emit clean install-config.yaml
 cat > "${INSTALL_DIR}/install-config.yaml" <<EOF
 apiVersion: v1
@@ -55,7 +61,7 @@ platform:
     vcenters:
     - server: ${VC_SERVER}
       user: ${GOVC_USERNAME}
-      password: ${PLACEHOLDER_PASSWORD}
+      password: ${GOVC_PASSWORD}
       datacenters:
       - ${VC_DC}
     failureDomains:
@@ -79,4 +85,12 @@ sshKey: |
 EOF
 
 echo "✅ install-config.yaml generated at: ${INSTALL_DIR}/install-config.yaml"
-echo "⚠️  Password placeholder will be replaced by VSPHERE_PASSWORD environment variable"
+echo "🔐 Password embedded directly (not placeholder)"
+
+# NEW: Validate the generated config
+echo "🔍 Validating generated config..."
+if grep -q "WILL_BE_SET_BY_ENVIRONMENT" "${INSTALL_DIR}/install-config.yaml"; then
+  echo "❌ Found placeholder in install-config.yaml - this will cause credential issues!"
+  exit 1
+fi
+echo "✅ No placeholders found in install-config.yaml"

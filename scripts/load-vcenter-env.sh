@@ -19,3 +19,15 @@ if [[ -z "$GOVC_URL" || -z "$GOVC_USERNAME" ]]; then
   echo "❌ Required GOVC environment variables not set"
   exit 1
 fi
+
+# NEW: Validate username format
+if [[ ! "$GOVC_USERNAME" =~ @.*\. ]]; then
+  echo "⚠️  Username should be in format user@domain.tld (current: $GOVC_USERNAME)"
+fi
+
+# NEW: Check if password is set
+if [[ -z "${GOVC_PASSWORD:-}" ]]; then
+  echo "⚠️  GOVC_PASSWORD not set - will need to be provided when needed"
+fi
+
+echo "📋 Loaded credentials for: $GOVC_USERNAME @ $(echo $GOVC_URL | sed 's|https://||')"

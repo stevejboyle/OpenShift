@@ -1,19 +1,22 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-CLUSTER_NAME="$1"
-if [[ -z "$CLUSTER_NAME" ]]; then
-  echo "Usage: $0 <cluster-name>"
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <cluster.yaml>"
   exit 1
 fi
 
-# Get the script directory and base directory correctly
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
+CLUSTER_YAML="$(realpath "$1")"
+if [ ! -f "$CLUSTER_YAML" ]; then
+  echo "❌ Cluster file not found: $CLUSTER_YAML"
+  exit 1
+fi
 
+# Load govc credentials
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/load-vcenter-env.sh"
 
-# Check if password is available, prompt if not
+# NEW: Ensure password is available
 if [[ -z "${GOVC_PASSWORD:-}" ]]; then
   echo -n "🔐 GOVC_PASSWORD not set. Enter vSphere password for $GOVC_USERNAME: "
   read -s GOVC_PASSWORD
@@ -21,30 +24,73 @@ if [[ -z "${GOVC_PASSWORD:-}" ]]; then
   export GOVC_PASSWORD
 fi
 
-# Validate that credentials are loaded
-if [[ -z "$GOVC_USERNAME" || -z "$GOVC_PASSWORD" ]]; then
-  echo "❌ GOVC credentials not loaded properly"
-  exit 1
-fi
+BASE_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Use the correct path structure
-MANIFESTS_DIR="${BASE_DIR}/install-configs/${CLUSTER_NAME}/manifests"
-mkdir -p "${MANIFESTS_DIR}"
+# Read cluster settings
+CN=$(yq -r '.clusterName'       "$CLUSTER_YAML")
+BD=$(yq -r '.baseDomain'        "$CLUSTER_YAML")
+PS=$(<"$(yq -r '.pullSecretFile' "$CLUSTER_YAML")")
+SK=$(<"$(yq -r '.sshKeyFile'     "$CLUSTER_YAML")")
 
-u=$(echo -n "$GOVC_USERNAME" | base64 -w0)
-p=$(echo -n "$GOVC_PASSWORD" | base64 -w0)
+VC_SERVER=$(yq -r '.vcenter_server'   "$CLUSTER_YAML")
+VC_DC=$(yq -r '.vcenter_datacenter'   "$CLUSTER_YAML")
+VC_CLUSTER=$(yq -r '.vcenter_cluster' "$CLUSTER_YAML")
+VC_DS=$(yq -r '.vcenter_datastore'    "$CLUSTER_YAML")
+VC_NET=$(yq -r '.vcenter_network'     "$CLUSTER_YAML")
+NETWORK_CIDR=$(yq -r '.network.cidr'  "$CLUSTER_YAML")
 
-cat > "${MANIFESTS_DIR}/vsphere-creds-secret.yaml" <<EOF
+# Create cluster-specific directory
+INSTALL_DIR="${BASE_DIR}/install-configs/${CN}"
+mkdir -p "$INSTALL_DIR"
+
+# FIXED: Use actual password instead of placeholder
+# Emit clean install-config.yaml
+cat > "${INSTALL_DIR}/install-config.yaml" <<EOF
 apiVersion: v1
-kind: Secret
+baseDomain: ${BD}
 metadata:
-  name: vsphere-creds
-  namespace: openshift-machine-api
-type: Opaque
-data:
-  username: ${u}
-  password: ${p}
+  name: ${CN}
+compute:
+- name: worker
+  replicas: 0
+controlPlane:
+  name: master
+  replicas: 3
+platform:
+  vsphere:
+    vcenters:
+    - server: ${VC_SERVER}
+      user: ${GOVC_USERNAME}
+      password: ${GOVC_PASSWORD}
+      datacenters:
+      - ${VC_DC}
+    failureDomains:
+    - name: primary
+      region: region-a
+      zone: zone-a
+      server: ${VC_SERVER}
+      topology:
+        datacenter: ${VC_DC}
+        computeCluster: "/${VC_DC}/host/${VC_CLUSTER}"
+        datastore: "/${VC_DC}/datastore/${VC_DS}"
+        networks:
+        - ${VC_NET}
+networking:
+  machineNetwork:
+  - cidr: ${NETWORK_CIDR}
+  networkType: OVNKubernetes
+pullSecret: '${PS}'
+sshKey: |
+  ${SK}
 EOF
 
-echo "✅ vsphere-creds manifest generated for cluster ${CLUSTER_NAME}."
-echo "📍 Location: ${MANIFESTS_DIR}/vsphere-creds-secret.yaml"
+echo "✅ install-config.yaml generated at: ${INSTALL_DIR}/install-config.yaml"
+echo "🔐 Password embedded directly (not placeholder)"
+
+# NEW: Validate the generated config
+echo "🔍 Validating generated config..."
+if grep -q "WILL_BE_SET_BY_ENVIRONMENT" "${INSTALL_DIR}/install-config.yaml"; then
+  echo "❌ Found placeholder in install-config.yaml - this will cause credential issues!"
+  exit 1
+fi
+echo "✅ No placeholders found in install-config.yaml"

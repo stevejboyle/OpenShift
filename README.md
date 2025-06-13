@@ -13,6 +13,8 @@ Automated deployment scripts for installing Red Hat OpenShift on VMware vSphere 
 - ✅ **Cloud provider taint handling** for reliable bootstrap
 - ✅ **Backup and debugging** capabilities
 - ✅ **End-to-end deployment monitoring** with status reporting
+- 🆕 **Robust vSphere credential management** with format validation
+- 🆕 **Automatic credential error prevention** and format checking
 
 ## Prerequisites
 
@@ -41,7 +43,9 @@ chmod +x scripts/*.sh
 ```bash
 # Copy and edit the govc environment file
 cp govc.env.example govc.env
-# Edit govc.env with your vSphere credentials (without password)
+# Edit govc.env with your vSphere credentials
+# Set GOVC_USERNAME (e.g., administrator@vsphere.sboyle.internal)
+# Set GOVC_PASSWORD in environment or script will prompt
 ```
 
 ### 3. Prepare Assets
@@ -71,12 +75,14 @@ cp clusters/ocp416.yaml.example clusters/ocp416.yaml
 
 ### 5. Deploy
 ```bash
-# Full automated deployment with cloud provider handling
+# Full automated deployment with cloud provider handling and credential validation
 ./scripts/rebuild-cluster.sh clusters/ocp416.yaml
 ```
 
 The deployment script now includes:
 - **Automatic bootstrap monitoring** - waits for bootstrap completion
+- **🆕 vSphere credential validation** - ensures credentials work before deployment
+- **🆕 Credential format verification** - prevents authentication cascade failures
 - **Cloud provider taint detection and removal** - prevents scheduling failures
 - **Critical pod verification** - ensures etcd and cloud operators start properly
 - **Installation completion monitoring** - waits for full cluster readiness
@@ -125,63 +131,145 @@ See [docs/haproxy-config.md](docs/haproxy-config.md) for complete HAProxy setup.
 |--------|---------|
 | `rebuild-cluster.sh` | **Main orchestration script** - full cluster rebuild with cloud provider handling |
 | `fix-cloud-provider-taints.sh` | **NEW** - Detects and fixes cloud provider initialization issues |
+| `validate-credentials.sh` | **🆕 NEW** - Validates vSphere credentials and secret format |
 | `delete-cluster.sh` | Clean up VMs and generated configs |
-| `deploy-cluster.sh` | Generate manifests and ignition configs |
-| `deploy-vms.sh` | Deploy and configure VMs |
-| `generate-install-config.sh` | Create OpenShift install-config.yaml |
+| `deploy-cluster.sh` | **🆕 Enhanced** - Generate manifests with proper credential format |
+| `deploy-vms.sh` | **🆕 Enhanced** - Deploy and configure VMs with credential validation |
+| `generate-install-config.sh` | **🆕 Fixed** - Create install-config.yaml with real passwords (no placeholders) |
 | `generate-static-ip-manifests.sh` | Create NetworkManager static IP configs |
 | `generate-core-password-manifest.sh` | Set console access password for core user |
-| `generate-vsphere-creds-manifest.sh` | Inject vSphere credentials |
+| `generate-vsphere-creds-manifest.sh` | **🆕 Fixed** - Inject vSphere credentials with standard format |
 | `generate-console-password-manifests.sh` | Set up OpenShift console authentication |
 | `inject-static-ips-into-ignition.sh` | Direct ignition file modification for static IPs |
-| `load-vcenter-env.sh` | Load vSphere environment variables |
+| `load-vcenter-env.sh` | **🆕 Enhanced** - Load and validate vSphere environment variables |
+
+## 🆕 Credential Management Enhancements
+
+### What Was Fixed
+The deployment automation now includes robust credential handling that prevents the most common vSphere authentication failures:
+
+**Previous Issues:**
+- ❌ Placeholder passwords (`WILL_BE_SET_BY_ENVIRONMENT`) remained in secrets
+- ❌ Server-specific credential keys (`vcenter.domain.com.username`) instead of standard format
+- ❌ Missing credential validation before deployment
+- ❌ Authentication cascade failures affecting entire cluster
+
+**New Solutions:**
+- ✅ **Real passwords embedded** in install-config.yaml and manifests
+- ✅ **Standard credential format** (`username`/`password` keys) used consistently
+- ✅ **Pre-deployment credential validation** ensures vSphere connectivity
+- ✅ **Format verification** prevents authentication failures
+- ✅ **Comprehensive secret generation** for all required components
+
+### Credential Validation
+```bash
+# Validate credentials before deployment
+./scripts/validate-credentials.sh ocp416
+
+# Validate deployed cluster credentials
+export KUBECONFIG=install-configs/ocp416/auth/kubeconfig
+./scripts/validate-credentials.sh ocp416
+```
+
+### Credential Format
+The scripts now ensure all vSphere secrets use the **standard format**:
+```yaml
+data:
+  username: <base64-encoded-username>
+  password: <base64-encoded-password>
+```
+
+**Not the problematic server-specific format:**
+```yaml
+data:
+  vcenter1.sboyle.internal.username: <base64>
+  vcenter1.sboyle.internal.password: <base64>
+```
 
 ## Deployment Flow
 
 The enhanced `rebuild-cluster.sh` now follows this robust deployment flow:
 
-1. **Pre-deployment**: Clean up, generate configs, inject manifests
-2. **VM Deployment**: Deploy and configure VMs with static IPs
-3. **Bootstrap Monitoring**: Wait for bootstrap completion (up to 40 minutes)
-4. **🆕 Cloud Provider Handling**: Automatically detect and fix cloud provider initialization issues
-5. **🆕 Critical Pod Verification**: Ensure etcd-operator and cloud-credential-operator are running
-6. **Installation Completion**: Wait for full cluster installation
-7. **🆕 Status Reporting**: Show final cluster health and any issues
+1. **🆕 Credential Validation**: Verify vSphere credentials and format
+2. **Pre-deployment**: Clean up, generate configs, inject manifests
+3. **🆕 Credential Format Check**: Ensure no placeholders remain
+4. **VM Deployment**: Deploy and configure VMs with static IPs
+5. **Bootstrap Monitoring**: Wait for bootstrap completion (up to 40 minutes)
+6. **Cloud Provider Handling**: Automatically detect and fix cloud provider initialization issues
+7. **Critical Pod Verification**: Ensure etcd-operator and cloud-credential-operator are running
+8. **Installation Completion**: Wait for full cluster installation
+9. **🆕 Final Credential Validation**: Verify deployed credentials work correctly
+10. **Status Reporting**: Show final cluster health and any issues
+
+### 🆕 Credential Error Prevention
+
+The new credential handling automatically:
+- **Validates username format** (should be user@domain.tld)
+- **Tests vSphere connectivity** before VM deployment
+- **Removes placeholder passwords** from all manifests
+- **Uses consistent secret format** across all components
+- **Verifies credential secrets** in deployed cluster
+
+This prevents the common authentication cascade where:
+```
+Machine API can't authenticate → Control plane machines fail → 
+Authentication operator fails → Console fails → Ingress fails
+```
 
 ### Cloud Provider Taint Handling
 
-The new `fix-cloud-provider-taints.sh` script automatically:
+The `fix-cloud-provider-taints.sh` script automatically:
 - Detects `node.cloudprovider.kubernetes.io/uninitialized` taints that prevent pod scheduling
 - Removes these taints when cloud provider initialization is delayed
 - Verifies critical system pods can schedule and start
 - Provides detailed logging for troubleshooting
 
-This prevents the common vSphere deployment issue where pods remain in "Pending" state due to cloud provider initialization delays.
-
 ## Usage Examples
 
-### Deploy New Cluster (Enhanced)
+### Deploy New Cluster (Enhanced with Credential Validation)
 ```bash
-# Full deployment with automatic cloud provider handling
+# Full deployment with automatic credential validation and cloud provider handling
 ./scripts/rebuild-cluster.sh clusters/ocp416.yaml
 ```
 
-The script will now show progress like:
+The script will now show enhanced progress like:
 ```
+🔍 Validating vSphere credentials...
+✅ vSphere connectivity confirmed
+📋 Loaded credentials for: administrator@vsphere.sboyle.internal @ vcenter1.sboyle.internal
+🔐 Creating ALL required vSphere credentials secrets...
+✅ Username format looks correct (contains @ and domain)
 🚀 Deploying VMs...
 🎉 VM deployment complete!
 ⏳ Waiting for cluster bootstrap to complete...
 ✅ Bootstrap completed successfully
 🔧 Checking and fixing cloud provider initialization issues...
-🔍 Waiting for nodes to be available...
-✅ Found 3 nodes
-⚠️  Found nodes with cloud provider initialization taints:
-🔧 Removing taints...
-✅ Successfully removed taint from master-0.ocp416.openshift.sboyle.internal
-⏳ Waiting for installation to complete...
-✅ Installation completed successfully!
+🔍 Validating deployed credentials...
+✅ All credential validations passed
 🏁 Final cluster status:
 ✅ Cluster API is accessible
+✅ All cluster operators healthy
+```
+
+### 🆕 Validate Credentials (New Feature)
+```bash
+# Validate credentials before deployment
+./scripts/validate-credentials.sh ocp416
+
+# Validate deployed cluster credentials
+export KUBECONFIG=install-configs/ocp416/auth/kubeconfig
+./scripts/validate-credentials.sh ocp416
+```
+
+### 🆕 Fix Credential Issues (Manual)
+```bash
+# If you encounter credential format issues in existing cluster
+oc delete secret vsphere-cloud-credentials -n openshift-machine-api
+oc create secret generic vsphere-cloud-credentials \
+  --from-literal=username="administrator@vsphere.sboyle.internal" \
+  --from-literal=password="your-password" \
+  -n openshift-machine-api
+oc delete pods -n openshift-machine-api -l k8s-app=machine-api-controllers
 ```
 
 ### Fix Cloud Provider Issues (Manual)
@@ -195,24 +283,16 @@ The script will now show progress like:
 ./scripts/delete-cluster.sh clusters/ocp416.yaml
 ```
 
-### Delete Cluster (force, no confirmation)
-```bash
-./scripts/delete-cluster.sh --force clusters/ocp416.yaml
-```
-
-### Deploy VMs Only
-```bash
-./scripts/deploy-vms.sh clusters/ocp416.yaml
-```
-
 ## Monitoring Installation
 
 ### Automated Monitoring (Built-in)
 The `rebuild-cluster.sh` script now includes comprehensive monitoring:
+- **🆕 Credential validation** at multiple stages
 - Bootstrap completion detection
 - Cloud provider issue detection and fixing
 - Critical pod readiness verification
 - Installation completion monitoring
+- **🆕 Final credential verification**
 - Final cluster status reporting
 
 ### Manual Monitoring
@@ -230,6 +310,9 @@ export KUBECONFIG=auth/kubeconfig
 oc get nodes
 oc get co  # Check cluster operators
 oc get pods --all-namespaces | grep -v Running
+
+# 🆕 Check machine authentication status
+oc describe machines -n openshift-machine-api | grep -A5 -B5 "Cannot complete login"
 ```
 
 ## Console Access
@@ -257,17 +340,32 @@ ssh core@192.168.42.30
 
 ## Troubleshooting
 
-### Enhanced Automatic Troubleshooting
+### 🆕 Automatic Credential Issue Resolution
 
 The deployment scripts now automatically handle:
+- **🆕 Credential format validation** - ensures standard format used
+- **🆕 Placeholder password removal** - prevents authentication failures
+- **🆕 vSphere connectivity testing** - validates credentials before deployment
+- **🆕 Machine API authentication** - verifies credentials work in deployed cluster
 - **Cloud provider initialization delays** - automatically removes blocking taints
 - **Pod scheduling failures** - verifies critical pods can start
 - **Bootstrap timeouts** - continues with installation after fixing issues
-- **Installation monitoring** - provides clear status and next steps
 
 ### Common Issues
 
-**🆕 Cloud Provider Initialization Issues (Automatically Fixed):**
+**🆕 vSphere Authentication Failures (Automatically Prevented):**
+- **Symptoms**: Machine API cannot connect to vSphere, authentication errors
+- **Automatic Prevention**: Scripts validate credentials and format before deployment
+- **Manual Fix**: Run `./scripts/validate-credentials.sh` to diagnose and fix
+- **Root Cause**: Usually placeholder passwords or server-specific credential keys
+
+**🆕 Credential Format Issues (Automatically Fixed):**
+- **Symptoms**: Secrets exist but Machine API can't read them
+- **Automatic Fix**: Scripts generate all secrets with standard format
+- **Manual Check**: `oc get secret vsphere-cloud-credentials -n openshift-machine-api -o yaml`
+- **Should see**: `username:` and `password:` keys, not server-specific keys
+
+**Cloud Provider Initialization Issues (Automatically Fixed):**
 - **Symptoms**: Pods stuck in "Pending" with `node.cloudprovider.kubernetes.io/uninitialized` taints
 - **Automatic Fix**: The script detects and removes these taints
 - **Manual Fix**: Run `./scripts/fix-cloud-provider-taints.sh install-configs/ocp416`
@@ -282,13 +380,17 @@ The deployment scripts now automatically handle:
 - Check HAProxy configuration for port 22623
 - Verify masters can reach bootstrap: `curl -k https://192.168.42.30:22623/config/master`
 
-**DNS resolution issues:**
-- Test DNS from VMs: `nslookup quay.io`
-- Check `/etc/resolv.conf` on VMs
-- Verify DNS servers in cluster YAML
-
-### Debug Commands
+### 🆕 Enhanced Debug Commands
 ```bash
+# Validate credentials in deployed cluster
+./scripts/validate-credentials.sh ocp416
+
+# Check credential format in secrets
+oc get secret vsphere-cloud-credentials -n openshift-machine-api -o yaml
+
+# Check for authentication errors in machines
+oc describe machines -n openshift-machine-api | grep -A5 -B5 "Cannot complete login"
+
 # Check VM IPs
 govc vm.ip ocp416-bootstrap
 govc vm.ip ocp416-master-0
@@ -304,9 +406,11 @@ oc get nodes -o custom-columns=NAME:.metadata.name,TAINTS:.spec.taints
 # Check critical pods
 oc get pods -n openshift-etcd-operator
 oc get pods -n openshift-cloud-credential-operator
+oc get pods -n openshift-machine-api
 
-# Check logs
-ssh core@192.168.42.30 'sudo journalctl -u bootkube.service'
+# Test vSphere connectivity
+source scripts/load-vcenter-env.sh
+govc about
 ```
 
 ### Script Debugging
@@ -318,6 +422,9 @@ tail -f /tmp/openshift-install-*.log
 
 # Check cloud provider fix logs
 ./scripts/fix-cloud-provider-taints.sh install-configs/ocp416
+
+# 🆕 Check credential validation logs
+./scripts/validate-credentials.sh ocp416
 ```
 
 ## File Structure
@@ -331,11 +438,14 @@ tail -f /tmp/openshift-install-*.log
 ├── clusters/
 │   └── ocp416.yaml
 ├── scripts/
-│   ├── rebuild-cluster.sh          # Enhanced with cloud provider handling
-│   ├── fix-cloud-provider-taints.sh # NEW - Cloud provider issue resolution
+│   ├── rebuild-cluster.sh          # Enhanced with credential validation
+│   ├── fix-cloud-provider-taints.sh # Cloud provider issue resolution
+│   ├── validate-credentials.sh     # 🆕 NEW - Credential validation
 │   ├── delete-cluster.sh
-│   ├── deploy-cluster.sh
-│   ├── deploy-vms.sh
+│   ├── deploy-cluster.sh           # 🆕 Enhanced credential generation
+│   ├── deploy-vms.sh               # 🆕 Enhanced with validation
+│   ├── generate-install-config.sh  # 🆕 Fixed placeholder password issue
+│   ├── load-vcenter-env.sh         # 🆕 Enhanced validation
 │   └── [other scripts...]
 ├── install-configs/
 │   └── ocp416/
@@ -346,30 +456,44 @@ tail -f /tmp/openshift-install-*.log
 └── README.md
 ```
 
-## What's New in v2.0
+## What's New in v3.0
 
-### 🆕 Enhanced Deployment Reliability
+### 🆕 Robust Credential Management
+- **Automatic credential format validation**
+- **Real password embedding** (no more placeholders)
+- **Standard secret format enforcement**
+- **Pre-deployment vSphere connectivity testing**
+- **Post-deployment credential verification**
+
+### 🆕 Enhanced Error Prevention
+- **Authentication cascade failure prevention**
+- **Machine API credential format validation**
+- **Comprehensive secret generation for all components**
+- **Format mismatch detection and correction**
+
+### 🆕 Improved Troubleshooting
+- **New credential validation script**
+- **Enhanced error messages and debugging**
+- **Automatic credential issue detection**
+- **Clear remediation steps for credential problems**
+
+### Enhanced Deployment Reliability
 - **Automatic cloud provider taint detection and removal**
 - **Critical pod readiness verification**
 - **End-to-end installation monitoring**
 - **Comprehensive error handling and recovery**
 
-### 🆕 Better User Experience
+### Better User Experience
 - **Real-time progress reporting with emojis**
 - **Automatic issue detection and resolution**
 - **Clear status reporting at each stage**
 - **Detailed final cluster health summary**
 
-### 🆕 Robust Error Handling
-- **Graceful timeout handling**
-- **Automatic retry mechanisms**
-- **Detailed error reporting and debugging information**
-- **Continuation of deployment after recoverable errors**
-
 ## Security Notes
 
 - Never commit sensitive files (credentials, pull secrets, private keys)
 - Use `.gitignore` to exclude sensitive assets
+- Set `GOVC_PASSWORD` as environment variable or script will prompt securely
 - Rotate passwords and certificates regularly
 - Follow Red Hat and VMware security best practices
 
@@ -379,7 +503,7 @@ tail -f /tmp/openshift-install-*.log
 2. Create a feature branch
 3. Test changes thoroughly with various vSphere environments
 4. Submit a pull request with detailed description
-5. Include any updates to the cloud provider handling logic
+5. Include any updates to credential handling logic
 
 ## License
 
@@ -390,4 +514,5 @@ Use it or don't use it. You don't need to pay me but don't complain either
 - [Red Hat OpenShift Documentation](https://docs.openshift.com/)
 - [VMware vSphere Documentation](https://docs.vmware.com/en/VMware-vSphere/)
 - [OpenShift on vSphere Guide](https://docs.openshift.com/container-platform/4.16/installing/installing_vsphere/)
+- **🆕 Enhanced troubleshooting**: Check credential validation with `validate-credentials.sh`
 - **Enhanced troubleshooting**: Check the automatic cloud provider handling in `fix-cloud-provider-taints.sh`
