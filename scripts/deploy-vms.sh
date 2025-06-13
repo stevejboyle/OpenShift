@@ -37,10 +37,9 @@ fi
 VMS=("${CLUSTER_NAME}-bootstrap" "${CLUSTER_NAME}-master-0" "${CLUSTER_NAME}-master-1" "${CLUSTER_NAME}-master-2" "${CLUSTER_NAME}-worker-0" "${CLUSTER_NAME}-worker-1")
 
 # Clone & configure
+govc folder.create "$VMF" || true
 for vm in "${VMS[@]}"; do
   echo "🚀 Deploying $vm..."
-  # Create folder for each VM (will warn if exists, but works)
-  govc folder.create "$VMF" || true
   govc vm.clone -vm "$TEMPLATE_PATH" -on=false -folder "$VMF" "$vm"
   
   # Configure network
