@@ -1,20 +1,22 @@
 # OpenShift vSphere Deployment Automation
 
-Automated deployment scripts for installing Red Hat OpenShift on VMware vSphere with static IP configuration, custom manifests, and robust cloud provider initialization handling.
+Automated deployment scripts for installing Red Hat OpenShift on VMware vSphere with comprehensive static IP configuration, custom manifests, and robust cloud provider initialization handling.
 
 ## Features
 
 - ✅ **Automated vSphere VM deployment** using govc
-- ✅ **Static IP configuration** for bootstrap and master nodes
+- ✅ **🆕 Comprehensive static IP configuration** for all nodes (bootstrap, masters, workers)
+- ✅ **🆕 Individual ignition files** for each node with specific static IPs
 - ✅ **Custom manifest injection** (vSphere credentials, console authentication, user passwords)
 - ✅ **Shared RHCOS template** management
-- ✅ **DNS configuration** from cluster YAML
+- ✅ **Dynamic network configuration** from cluster YAML
 - ✅ **Load balancer integration** (HAProxy)
 - ✅ **Cloud provider taint handling** for reliable bootstrap
 - ✅ **Backup and debugging** capabilities
 - ✅ **End-to-end deployment monitoring** with status reporting
 - 🆕 **Robust vSphere credential management** with format validation
 - 🆕 **Automatic credential error prevention** and format checking
+- 🆕 **Per-node static IP assignment** via individual ignition files
 
 ## Prerequisites
 
@@ -75,11 +77,13 @@ cp clusters/ocp416.yaml.example clusters/ocp416.yaml
 
 ### 5. Deploy
 ```bash
-# Full automated deployment with cloud provider handling and credential validation
+# Full automated deployment with static IPs and credential validation
 ./scripts/rebuild-cluster.sh clusters/ocp416.yaml
 ```
 
 The deployment script now includes:
+- **🆕 Dynamic network configuration** - reads network settings from cluster YAML
+- **🆕 Individual node ignition files** - each VM gets specific static IP configuration
 - **Automatic bootstrap monitoring** - waits for bootstrap completion
 - **🆕 vSphere credential validation** - ensures credentials work before deployment
 - **🆕 Credential format verification** - prevents authentication cascade failures
@@ -103,6 +107,7 @@ vcenter_network: OpenShift_192.168.42.0
 sshKeyFile: assets/ssh-key.pub
 pullSecretFile: assets/pull-secret.json
 consolePasswordFile: assets/console-password.txt
+# 🆕 Dynamic network configuration
 network:
   cidr: 192.168.42.0/24
   gateway: 192.168.42.1
@@ -111,37 +116,163 @@ network:
     - 192.168.1.98
 ```
 
-### Static IP Assignments
-- **Bootstrap**: 192.168.42.30
-- **Master-0**: 192.168.42.31
-- **Master-1**: 192.168.42.32
-- **Master-2**: 192.168.42.33
-- **Workers**: DHCP (configurable)
+### 🆕 Static IP Assignments (Automatic)
+The deployment now automatically assigns static IPs based on your network configuration:
+
+- **Bootstrap**: `{network_base}.30` (e.g., 192.168.42.30)
+- **Master-0**: `{network_base}.31` (e.g., 192.168.42.31)
+- **Master-1**: `{network_base}.32` (e.g., 192.168.42.32)
+- **Master-2**: `{network_base}.33` (e.g., 192.168.42.33)
+- **Worker-0**: `{network_base}.40` (e.g., 192.168.42.40)
+- **Worker-1**: `{network_base}.41` (e.g., 192.168.42.41)
+
+Where `{network_base}` is automatically extracted from your `network.cidr` configuration.
 
 ### Load Balancer Configuration
 Required DNS entries and load balancer backends:
 - `api.ocp416.openshift.sboyle.internal` → 192.168.42.10 (HAProxy)
 - `*.apps.ocp416.openshift.sboyle.internal` → 192.168.42.20 (HAProxy)
 
+**🆕 Load Balancer Backend Configuration:**
+```
+# API Backend (port 6443)
+server bootstrap 192.168.42.30:6443 check
+server master-0 192.168.42.31:6443 check
+server master-1 192.168.42.32:6443 check
+server master-2 192.168.42.33:6443 check
+
+# Apps Backend (ports 80/443)
+server worker-0 192.168.42.40:80 check
+server worker-1 192.168.42.41:80 check
+```
+
 See [docs/haproxy-config.md](docs/haproxy-config.md) for complete HAProxy setup.
+
+## 🆕 Static IP Implementation
+
+### How Static IPs Work
+The deployment uses a multi-layered approach for reliable static IP assignment:
+
+1. **Bootstrap Node**: Uses machine config manifest that gets embedded in bootstrap.ign
+2. **Master Nodes**: Individual ignition files (master-0.ign, master-1.ign, master-2.ign) with specific IPs
+3. **Worker Nodes**: Individual ignition files (worker-0.ign, worker-1.ign) with specific IPs
+
+### 🆕 Individual Ignition Files
+Each VM gets its own ignition file with embedded static IP configuration:
+
+```bash
+install-configs/ocp416/
+├── bootstrap.ign      # Contains static IP for .30
+├── master-0.ign       # Contains static IP for .31
+├── master-1.ign       # Contains static IP for .32
+├── master-2.ign       # Contains static IP for .33
+├── worker-0.ign       # Contains static IP for .40
+├── worker-1.ign       # Contains static IP for .41
+└── worker.ign         # Original (unused)
+```
+
+### 🆕 NetworkManager Configuration
+Each ignition file contains a NetworkManager connection profile:
+
+```ini
+[connection]
+id=ens192
+type=ethernet
+interface-name=ens192
+autoconnect=true
+autoconnect-priority=999
+
+[ethernet]
+
+[ipv4]
+address1=192.168.42.31/24,192.168.42.1
+dns=192.168.1.97;
+method=manual
+
+[ipv6]
+addr-gen-mode=eui64
+method=disabled
+```
+
+### 🆕 Dynamic Network Parsing
+The scripts automatically read network configuration from your cluster YAML:
+
+```yaml
+# Supported formats:
+network:
+  cidr: 192.168.42.0/24
+  gateway: 192.168.42.1
+  dns_servers:
+    - 192.168.1.97
+    - 192.168.1.98
+
+# Or simplified format:
+network: 192.168.42.0/24
+
+# Or alternative naming:
+subnet:
+  cidr: 10.0.100.0/24
+  gateway: 10.0.100.1
+```
 
 ## Scripts Overview
 
 | Script | Purpose |
 |--------|---------|
-| `rebuild-cluster.sh` | **Main orchestration script** - full cluster rebuild with cloud provider handling |
+| `rebuild-cluster.sh` | **Main orchestration script** - full cluster rebuild with static IPs and cloud provider handling |
+| `generate-static-ip-manifests.sh` | **🆕 Enhanced** - Create NetworkManager static IP configs with dynamic network parsing |
+| `create-individual-node-ignitions.sh` | **🆕 NEW** - Generate individual ignition files for each node with specific static IPs |
+| `deploy-vms.sh` | **🆕 Enhanced** - Deploy VMs using individual ignition files |
 | `fix-cloud-provider-taints.sh` | **NEW** - Detects and fixes cloud provider initialization issues |
 | `validate-credentials.sh` | **🆕 NEW** - Validates vSphere credentials and secret format |
 | `delete-cluster.sh` | Clean up VMs and generated configs |
 | `deploy-cluster.sh` | **🆕 Enhanced** - Generate manifests with proper credential format |
-| `deploy-vms.sh` | **🆕 Enhanced** - Deploy and configure VMs with credential validation |
 | `generate-install-config.sh` | **🆕 Fixed** - Create install-config.yaml with real passwords (no placeholders) |
-| `generate-static-ip-manifests.sh` | Create NetworkManager static IP configs |
 | `generate-core-password-manifest.sh` | Set console access password for core user |
 | `generate-vsphere-creds-manifest.sh` | **🆕 Fixed** - Inject vSphere credentials with standard format |
 | `generate-console-password-manifests.sh` | Set up OpenShift console authentication |
 | `inject-static-ips-into-ignition.sh` | Direct ignition file modification for static IPs |
 | `load-vcenter-env.sh` | **🆕 Enhanced** - Load and validate vSphere environment variables |
+
+## 🆕 Enhanced Static IP Management
+
+### Automatic Network Configuration
+The deployment scripts now automatically:
+- **Parse network settings** from cluster YAML configuration
+- **Extract network base** from CIDR notation (e.g., 192.168.42.0/24 → 192.168.42)
+- **Use provided gateway** or default to `.1`
+- **Use provided DNS servers** or fall back to gateway
+- **Generate sequential IP assignments** based on node type and index
+
+### Individual Node Configurations
+Each node gets a tailored configuration:
+
+```bash
+# Bootstrap node - via machine config in bootstrap.ign
+Bootstrap: {network_base}.30
+
+# Master nodes - via individual ignition files
+Master-0:  {network_base}.31  (master-0.ign)
+Master-1:  {network_base}.32  (master-1.ign)
+Master-2:  {network_base}.33  (master-2.ign)
+
+# Worker nodes - via individual ignition files
+Worker-0:  {network_base}.40  (worker-0.ign)
+Worker-1:  {network_base}.41  (worker-1.ign)
+```
+
+### 🆕 Deployment Integration
+The `deploy-vms.sh` script automatically detects and uses the correct ignition file:
+
+```bash
+# VM naming to ignition file mapping:
+ocp416-bootstrap → bootstrap.ign
+ocp416-master-0  → master-0.ign
+ocp416-master-1  → master-1.ign
+ocp416-master-2  → master-2.ign
+ocp416-worker-0  → worker-0.ign
+ocp416-worker-1  → worker-1.ign
+```
 
 ## 🆕 Credential Management Enhancements
 
@@ -192,14 +323,33 @@ The enhanced `rebuild-cluster.sh` now follows this robust deployment flow:
 
 1. **🆕 Credential Validation**: Verify vSphere credentials and format
 2. **Pre-deployment**: Clean up, generate configs, inject manifests
-3. **🆕 Credential Format Check**: Ensure no placeholders remain
-4. **VM Deployment**: Deploy and configure VMs with static IPs
-5. **Bootstrap Monitoring**: Wait for bootstrap completion (up to 40 minutes)
-6. **Cloud Provider Handling**: Automatically detect and fix cloud provider initialization issues
-7. **Critical Pod Verification**: Ensure etcd-operator and cloud-credential-operator are running
-8. **Installation Completion**: Wait for full cluster installation
-9. **🆕 Final Credential Validation**: Verify deployed credentials work correctly
-10. **Status Reporting**: Show final cluster health and any issues
+3. **🆕 Static IP Manifest Generation**: Create NetworkManager configs with dynamic network parsing
+4. **🆕 Credential Format Check**: Ensure no placeholders remain
+5. **Ignition Generation**: Create base ignition files
+6. **🆕 Individual Node Ignition Creation**: Generate specific ignition files for each node with static IPs
+7. **VM Deployment**: Deploy and configure VMs with individual ignition files
+8. **Bootstrap Monitoring**: Wait for bootstrap completion (up to 40 minutes)
+9. **Cloud Provider Handling**: Automatically detect and fix cloud provider initialization issues
+10. **Critical Pod Verification**: Ensure etcd-operator and cloud-credential-operator are running
+11. **Installation Completion**: Wait for full cluster installation
+12. **🆕 Final Credential Validation**: Verify deployed credentials work correctly
+13. **🆕 Static IP Verification**: Confirm all nodes have their assigned static IPs
+14. **Status Reporting**: Show final cluster health and any issues
+
+### 🆕 Static IP Verification
+
+The deployment process now includes automatic verification:
+
+```bash
+# Automatically checks that each VM has its expected IP
+✅ Static IP verification:
+   Bootstrap (192.168.42.30): ✅ Configured
+   Master-0 (192.168.42.31):  ✅ Configured  
+   Master-1 (192.168.42.32):  ✅ Configured
+   Master-2 (192.168.42.33):  ✅ Configured
+   Worker-0 (192.168.42.40):  ✅ Configured
+   Worker-1 (192.168.42.41):  ✅ Configured
+```
 
 ### 🆕 Credential Error Prevention
 
@@ -226,9 +376,9 @@ The `fix-cloud-provider-taints.sh` script automatically:
 
 ## Usage Examples
 
-### Deploy New Cluster (Enhanced with Credential Validation)
+### Deploy New Cluster (Enhanced with Static IP and Credential Validation)
 ```bash
-# Full deployment with automatic credential validation and cloud provider handling
+# Full deployment with automatic static IP assignment and credential validation
 ./scripts/rebuild-cluster.sh clusters/ocp416.yaml
 ```
 
@@ -236,19 +386,48 @@ The script will now show enhanced progress like:
 ```
 🔍 Validating vSphere credentials...
 ✅ vSphere connectivity confirmed
+📡 Using network: 192.168.42.0/24
+🏠 Network base: 192.168.42
+🚪 Gateway: 192.168.42.1
+🌐 DNS: 192.168.1.97
+🌐 Generating static IP manifests for cluster ocp416...
+✅ Static IP manifests generated:
+   Bootstrap: 192.168.42.30
+   Master-0:  192.168.42.31
+   Master-1:  192.168.42.32
+   Master-2:  192.168.42.33
+   Worker-0:  192.168.42.40
+   Worker-1:  192.168.42.41
+🔧 Creating individual master and worker ignition files with static IPs...
+✅ Individual ignition files created
 📋 Loaded credentials for: administrator@vsphere.sboyle.internal @ vcenter1.sboyle.internal
 🔐 Creating ALL required vSphere credentials secrets...
 ✅ Username format looks correct (contains @ and domain)
 🚀 Deploying VMs...
+✅ Applied ignition config: master-0.ign
+✅ Applied ignition config: master-1.ign
+✅ Applied ignition config: master-2.ign
+✅ Applied ignition config: worker-0.ign
+✅ Applied ignition config: worker-1.ign
 🎉 VM deployment complete!
 ⏳ Waiting for cluster bootstrap to complete...
 ✅ Bootstrap completed successfully
 🔧 Checking and fixing cloud provider initialization issues...
 🔍 Validating deployed credentials...
 ✅ All credential validations passed
+✅ Static IP verification completed
 🏁 Final cluster status:
 ✅ Cluster API is accessible
 ✅ All cluster operators healthy
+```
+
+### 🆕 Generate Static IP Configurations Only
+```bash
+# Generate static IP manifests without full deployment
+./scripts/generate-static-ip-manifests.sh clusters/ocp416.yaml
+
+# Generate individual ignition files with static IPs
+./scripts/create-individual-node-ignitions.sh clusters/ocp416.yaml
 ```
 
 ### 🆕 Validate Credentials (New Feature)
@@ -287,12 +466,16 @@ oc delete pods -n openshift-machine-api -l k8s-app=machine-api-controllers
 
 ### Automated Monitoring (Built-in)
 The `rebuild-cluster.sh` script now includes comprehensive monitoring:
+- **🆕 Network configuration parsing and validation**
+- **🆕 Static IP assignment verification**
+- **🆕 Individual ignition file creation and validation**
 - **🆕 Credential validation** at multiple stages
 - Bootstrap completion detection
 - Cloud provider issue detection and fixing
 - Critical pod readiness verification
 - Installation completion monitoring
 - **🆕 Final credential verification**
+- **🆕 Final static IP verification**
 - Final cluster status reporting
 
 ### Manual Monitoring
@@ -310,6 +493,15 @@ export KUBECONFIG=auth/kubeconfig
 oc get nodes
 oc get co  # Check cluster operators
 oc get pods --all-namespaces | grep -v Running
+
+# 🆕 Check node IP assignments
+oc get nodes -o wide
+
+# 🆕 Verify static IP configurations
+for vm in bootstrap master-0 master-1 master-2 worker-0 worker-1; do
+  echo "Checking ${vm}..."
+  govc vm.ip ocp416-${vm}
+done
 
 # 🆕 Check machine authentication status
 oc describe machines -n openshift-machine-api | grep -A5 -B5 "Cannot complete login"
@@ -331,7 +523,12 @@ oc login -u admin
 ### Node Console Access
 ```bash
 # SSH with key
-ssh core@192.168.42.30
+ssh core@192.168.42.30  # Bootstrap
+ssh core@192.168.42.31  # Master-0
+ssh core@192.168.42.32  # Master-1
+ssh core@192.168.42.33  # Master-2
+ssh core@192.168.42.40  # Worker-0
+ssh core@192.168.42.41  # Worker-1
 
 # vCenter console with password
 # Username: core
@@ -340,9 +537,13 @@ ssh core@192.168.42.30
 
 ## Troubleshooting
 
-### 🆕 Automatic Credential Issue Resolution
+### 🆕 Automatic Static IP Issue Resolution
 
 The deployment scripts now automatically handle:
+- **🆕 Dynamic network configuration parsing** - reads from cluster YAML
+- **🆕 Individual ignition file generation** - ensures each node gets specific IP
+- **🆕 NetworkManager configuration validation** - verifies network configs are correct
+- **🆕 IP assignment verification** - confirms VMs get their expected IPs
 - **🆕 Credential format validation** - ensures standard format used
 - **🆕 Placeholder password removal** - prevents authentication failures
 - **🆕 vSphere connectivity testing** - validates credentials before deployment
@@ -352,6 +553,25 @@ The deployment scripts now automatically handle:
 - **Bootstrap timeouts** - continues with installation after fixing issues
 
 ### Common Issues
+
+**🆕 Static IP Assignment Issues (Automatically Prevented):**
+- **Symptoms**: VMs not getting expected static IPs
+- **Automatic Prevention**: Individual ignition files ensure each VM gets specific IP
+- **Manual Check**: `govc vm.ip ocp416-master-0` should show 192.168.42.31
+- **Manual Fix**: Check NetworkManager logs: `sudo journalctl -u NetworkManager`
+- **Root Cause**: Usually network configuration or DNS issues
+
+**🆕 Network Configuration Issues (Automatically Detected):**
+- **Symptoms**: Script fails to parse network from cluster YAML
+- **Automatic Detection**: Script validates network configuration before proceeding
+- **Manual Fix**: Ensure cluster YAML has valid `network.cidr` or `subnet.cidr`
+- **Example**: `network: { cidr: "192.168.42.0/24", gateway: "192.168.42.1" }`
+
+**🆕 Individual Ignition File Issues (Automatically Fixed):**
+- **Symptoms**: VMs boot but don't get static IPs
+- **Automatic Fix**: Script validates ignition files contain NetworkManager configs
+- **Manual Check**: `jq '.storage.files[] | select(.path | contains("system-connections"))' master-0.ign`
+- **Manual Fix**: Re-run `./scripts/create-individual-node-ignitions.sh clusters/ocp416.yaml`
 
 **🆕 vSphere Authentication Failures (Automatically Prevented):**
 - **Symptoms**: Machine API cannot connect to vSphere, authentication errors
@@ -374,6 +594,7 @@ The deployment scripts now automatically handle:
 - Check manifest backup in `install-configs/ocp416/manifests-backup-*/`
 - Verify DNS servers are reachable
 - Check NetworkManager logs: `sudo journalctl -u NetworkManager`
+- Verify individual ignition files exist: `ls install-configs/ocp416/master-*.ign worker-*.ign`
 
 **Bootstrap timeout:**
 - The script now handles this automatically by proceeding to cloud provider checks
@@ -382,6 +603,13 @@ The deployment scripts now automatically handle:
 
 ### 🆕 Enhanced Debug Commands
 ```bash
+# Validate network configuration parsing
+./scripts/generate-static-ip-manifests.sh clusters/ocp416.yaml
+
+# Check individual ignition files
+ls -la install-configs/ocp416/*.ign
+jq '.storage.files[] | select(.path | contains("system-connections")) | .path' install-configs/ocp416/master-0.ign
+
 # Validate credentials in deployed cluster
 ./scripts/validate-credentials.sh ocp416
 
@@ -391,12 +619,17 @@ oc get secret vsphere-cloud-credentials -n openshift-machine-api -o yaml
 # Check for authentication errors in machines
 oc describe machines -n openshift-machine-api | grep -A5 -B5 "Cannot complete login"
 
-# Check VM IPs
-govc vm.ip ocp416-bootstrap
-govc vm.ip ocp416-master-0
+# Check VM IPs match expected assignments
+echo "Expected vs Actual IP assignments:"
+echo "Bootstrap (expected 192.168.42.30): $(govc vm.ip ocp416-bootstrap)"
+echo "Master-0 (expected 192.168.42.31):  $(govc vm.ip ocp416-master-0)"
+echo "Master-1 (expected 192.168.42.32):  $(govc vm.ip ocp416-master-1)"
+echo "Master-2 (expected 192.168.42.33):  $(govc vm.ip ocp416-master-2)"
+echo "Worker-0 (expected 192.168.42.40):  $(govc vm.ip ocp416-worker-0)"
+echo "Worker-1 (expected 192.168.42.41):  $(govc vm.ip ocp416-worker-1)"
 
 # Check cluster status
-oc get nodes
+oc get nodes -o wide
 oc get csr
 oc get co
 
@@ -411,6 +644,9 @@ oc get pods -n openshift-machine-api
 # Test vSphere connectivity
 source scripts/load-vcenter-env.sh
 govc about
+
+# 🆕 Verify NetworkManager configurations on nodes
+ssh core@192.168.42.31 "sudo cat /etc/NetworkManager/system-connections/ens192.nmconnection"
 ```
 
 ### Script Debugging
@@ -422,6 +658,12 @@ tail -f /tmp/openshift-install-*.log
 
 # Check cloud provider fix logs
 ./scripts/fix-cloud-provider-taints.sh install-configs/ocp416
+
+# 🆕 Check static IP generation logs
+./scripts/generate-static-ip-manifests.sh clusters/ocp416.yaml
+
+# 🆕 Check individual ignition creation logs
+./scripts/create-individual-node-ignitions.sh clusters/ocp416.yaml
 
 # 🆕 Check credential validation logs
 ./scripts/validate-credentials.sh ocp416
@@ -436,83 +678,43 @@ tail -f /tmp/openshift-install-*.log
 │   ├── console-password.txt
 │   └── rhcos-4.16.36-x86_64-vmware.x86_64.ova
 ├── clusters/
-│   └── ocp416.yaml
+│   └── ocp416.yaml                      # 🆕 Enhanced with network config
 ├── scripts/
-│   ├── rebuild-cluster.sh          # Enhanced with credential validation
-│   ├── fix-cloud-provider-taints.sh # Cloud provider issue resolution
-│   ├── validate-credentials.sh     # 🆕 NEW - Credential validation
+│   ├── rebuild-cluster.sh               # Enhanced with static IP orchestration
+│   ├── generate-static-ip-manifests.sh  # 🆕 Enhanced with dynamic network parsing
+│   ├── create-individual-node-ignitions.sh # 🆕 NEW - Individual ignition files
+│   ├── deploy-vms.sh                    # 🆕 Enhanced to use individual ignitions
+│   ├── fix-cloud-provider-taints.sh     # Cloud provider issue resolution
+│   ├── validate-credentials.sh          # 🆕 NEW - Credential validation
 │   ├── delete-cluster.sh
-│   ├── deploy-cluster.sh           # 🆕 Enhanced credential generation
-│   ├── deploy-vms.sh               # 🆕 Enhanced with validation
-│   ├── generate-install-config.sh  # 🆕 Fixed placeholder password issue
-│   ├── load-vcenter-env.sh         # 🆕 Enhanced validation
+│   ├── deploy-cluster.sh                # 🆕 Enhanced credential generation
+│   ├── generate-install-config.sh       # 🆕 Fixed placeholder password issue
+│   ├── load-vcenter-env.sh              # 🆕 Enhanced validation
 │   └── [other scripts...]
 ├── install-configs/
 │   └── ocp416/
-│       ├── *.ign
+│       ├── bootstrap.ign               # Contains static IP for bootstrap
+│       ├── master-0.ign                # 🆕 Individual master ignitions
+│       ├── master-1.ign                # 🆕 with specific static IPs
+│       ├── master-2.ign                # 🆕
+│       ├── worker-0.ign                # 🆕 Individual worker ignitions  
+│       ├── worker-1.ign                # 🆕 with specific static IPs
+│       ├── master.ign                  # Original (base template)
+│       ├── worker.ign                  # Original (base template)
 │       ├── auth/
 │       └── manifests-backup-*/
 ├── govc.env
 └── README.md
 ```
 
-## What's New in v3.0
+## What's New in v4.0
 
-### 🆕 Robust Credential Management
-- **Automatic credential format validation**
-- **Real password embedding** (no more placeholders)
-- **Standard secret format enforcement**
-- **Pre-deployment vSphere connectivity testing**
-- **Post-deployment credential verification**
+### 🆕 Comprehensive Static IP Management
+- **Dynamic network configuration parsing** from cluster YAML
+- **Individual ignition files** for each node with specific static IPs
+- **Automatic IP assignment** based on node type and network configuration
+- **NetworkManager integration** for reliable static IP configuration
+- **Per-node IP verification** during deployment
 
-### 🆕 Enhanced Error Prevention
-- **Authentication cascade failure prevention**
-- **Machine API credential format validation**
-- **Comprehensive secret generation for all components**
-- **Format mismatch detection and correction**
-
-### 🆕 Improved Troubleshooting
-- **New credential validation script**
-- **Enhanced error messages and debugging**
-- **Automatic credential issue detection**
-- **Clear remediation steps for credential problems**
-
-### Enhanced Deployment Reliability
-- **Automatic cloud provider taint detection and removal**
-- **Critical pod readiness verification**
-- **End-to-end installation monitoring**
-- **Comprehensive error handling and recovery**
-
-### Better User Experience
-- **Real-time progress reporting with emojis**
-- **Automatic issue detection and resolution**
-- **Clear status reporting at each stage**
-- **Detailed final cluster health summary**
-
-## Security Notes
-
-- Never commit sensitive files (credentials, pull secrets, private keys)
-- Use `.gitignore` to exclude sensitive assets
-- Set `GOVC_PASSWORD` as environment variable or script will prompt securely
-- Rotate passwords and certificates regularly
-- Follow Red Hat and VMware security best practices
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Test changes thoroughly with various vSphere environments
-4. Submit a pull request with detailed description
-5. Include any updates to credential handling logic
-
-## License
-
-Use it or don't use it. You don't need to pay me but don't complain either
-
-## Support
-
-- [Red Hat OpenShift Documentation](https://docs.openshift.com/)
-- [VMware vSphere Documentation](https://docs.vmware.com/en/VMware-vSphere/)
-- [OpenShift on vSphere Guide](https://docs.openshift.com/container-platform/4.16/installing/installing_vsphere/)
-- **🆕 Enhanced troubleshooting**: Check credential validation with `validate-credentials.sh`
-- **Enhanced troubleshooting**: Check the automatic cloud provider handling in `fix-cloud-provider-taints.sh`
+### 🆕 Enhanced Network Configuration
+- **Flexible YAML

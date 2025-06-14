@@ -66,6 +66,10 @@ for vm in "${VMS[@]}"; do
     ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/master-1.ign" 
   elif [[ "$vm" == *"master-2"* ]]; then
     ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/master-2.ign"
+  elif [[ "$vm" == *"worker-0"* ]]; then
+    ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/worker-0.ign"
+  elif [[ "$vm" == *"worker-1"* ]]; then
+    ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/worker-1.ign"
   else
     ign="${BASE_DIR}/install-configs/${CLUSTER_NAME}/worker.ign"
   fi
@@ -74,6 +78,7 @@ for vm in "${VMS[@]}"; do
     enc="$(base64 -w0 <"$ign")"
     govc vm.change -vm "$vm" -e "guestinfo.ignition.config.data.encoding=base64"
     govc vm.change -vm "$vm" -e "guestinfo.ignition.config.data=${enc}"
+    echo "✅ Applied ignition config: $(basename "$ign")"
   else
     echo "⚠ Warning: Ignition file not found: $ign"
   fi
@@ -81,4 +86,4 @@ for vm in "${VMS[@]}"; do
   govc vm.power -on "$vm"
 done
 
-echo "✅ All VMs deployed successfully with validated credentials."
+echo "✅ All VMs deployed successfully with static IP configurations."

@@ -50,7 +50,7 @@ cd "$INSTALL_DIR"
 openshift-install create manifests
 cd "$SCRIPT_DIR"
 
-echo "🌐 Injecting static IP manifests..."
+echo "🌐 Generating static IP manifests..."
 "$SCRIPT_DIR/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
 
 echo "🔑 Injecting core user password manifests..."
@@ -75,6 +75,9 @@ echo "🔥 Generating ignition-configs..."
 cd "$INSTALL_DIR"
 openshift-install create ignition-configs
 cd "$SCRIPT_DIR"
+
+echo "🌐 Creating individual master ignition files with static IPs..."
+"$SCRIPT_DIR/create-individual-master-ignitions.sh" "$CLUSTER_YAML"
 
 echo "🌐 Injecting static IPs directly into ignition files..."
 "$SCRIPT_DIR/inject-static-ips-into-ignition.sh" "$CLUSTER_YAML"
@@ -192,6 +195,10 @@ echo ""
 echo "🔍 Verifying static IP injection..."
 if cat "${INSTALL_DIR}/bootstrap.ign" | jq '.storage.files[] | select(.path | contains("system-connections"))' | grep -q "path"; then
   echo "✅ Static IP configuration found in bootstrap ignition file"
+  
+  # Show which IP was configured
+  BOOTSTRAP_IP=$(cat "${INSTALL_DIR}/bootstrap.ign" | jq -r '.storage.files[] | select(.path | contains("system-connections")) | .contents.source' | sed 's/data:text\/plain;charset=utf-8;base64,//' | base64 -d | grep "address1=" | cut -d'=' -f2 | cut -d'/' -f1)
+  echo "   Bootstrap IP configured as: $BOOTSTRAP_IP"
 else
   echo "❌ Static IP configuration NOT found in bootstrap ignition file"
   echo "🔍 Check manifest backup at: $BACKUP_DIR"
