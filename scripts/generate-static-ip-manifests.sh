@@ -2,7 +2,7 @@
 set -e
 
 CLUSTER_YAML="$(realpath "$1")"
-BOOTSTRAP_MODE="${2:-false}"  # Add bootstrap mode flag
+BOOTSTRAP_MODE="${2:-bootstrap}"  # Default to bootstrap mode if not specified
 
 if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml> [bootstrap|post-install]"
@@ -33,8 +33,9 @@ GATEWAY="${NETWORK_BASE}.1"
 DNS_SERVER="${NETWORK_BASE}.1"
 
 echo "📡 Using network: $SUBNET_CIDR"
-echo "🏠 Network base: $NETWORK_BASE"
+echo "🏠 Network base: $NETWORK_BASE" 
 echo "🚪 Gateway: $GATEWAY"
+echo "🌐 DNS: $DNS_SERVERS"
 echo "🌐 Generating static IP manifests for cluster ${CLUSTER_NAME}..."
 
 # Create machine manifests with static IPs
@@ -80,7 +81,7 @@ autoconnect-priority=999
 
 [ipv4]
 address1=${ip}/24,${GATEWAY}
-dns=${DNS_SERVER};
+dns=${DNS_SERVERS};
 method=manual
 
 [ipv6]
