@@ -85,7 +85,7 @@ inject_static_ip() {
   
   echo "   Creating ${node_type} with IP ${ip}..."
   
-  # Create static IP file entry
+  # Create static IP file entry - only create the ens192 connection
   STATIC_IP_FILE='{
     "path": "/etc/NetworkManager/system-connections/ens192.nmconnection",
     "mode": 384,
@@ -95,9 +95,13 @@ inject_static_ip() {
     }
   }'
   
-  # Merge the static IP configuration into base ignition
+  # Remove any existing NetworkManager connections and add our static IP config
   jq --argjson staticFile "$STATIC_IP_FILE" '
+    # Remove any existing system-connections files
+    .storage.files = [.storage.files[] | select(.path | contains("system-connections") | not)] |
+    # Add our static IP file
     .storage.files += [$staticFile] |
+    # Ensure NetworkManager service is enabled
     .systemd.units += [{"name": "NetworkManager.service", "enabled": true}] |
     .systemd.units |= unique_by(.name)
   ' "$base_ign" > "$target_ign"

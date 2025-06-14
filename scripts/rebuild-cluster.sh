@@ -76,8 +76,8 @@ cd "$INSTALL_DIR"
 openshift-install create ignition-configs
 cd "$SCRIPT_DIR"
 
-echo "🌐 Creating individual master ignition files with static IPs..."
-"$SCRIPT_DIR/create-individual-master-ignitions.sh" "$CLUSTER_YAML"
+echo "🌐 Creating individual node ignition files with static IPs..."
+"$SCRIPT_DIR/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
 
 echo "🌐 Injecting static IPs directly into ignition files..."
 "$SCRIPT_DIR/inject-static-ips-into-ignition.sh" "$CLUSTER_YAML"
@@ -203,6 +203,29 @@ else
   echo "❌ Static IP configuration NOT found in bootstrap ignition file"
   echo "🔍 Check manifest backup at: $BACKUP_DIR"
 fi
+
+# Check individual ignition files
+echo ""
+echo "🔍 Verifying individual node ignition files..."
+for node_type in master worker; do
+  for i in 0 1 2; do
+    if [ "$node_type" = "worker" ] && [ $i -gt 1 ]; then
+      break
+    fi
+    
+    IGN_FILE="${INSTALL_DIR}/${node_type}-${i}.ign"
+    if [ -f "$IGN_FILE" ]; then
+      if jq '.storage.files[] | select(.path | contains("system-connections"))' "$IGN_FILE" | grep -q "path"; then
+        NODE_IP=$(jq -r '.storage.files[] | select(.path | contains("system-connections")) | .contents.source' "$IGN_FILE" | sed 's/data:text\/plain;charset=utf-8;base64,//' | base64 -d | grep "address1=" | cut -d'=' -f2 | cut -d'/' -f1)
+        echo "✅ ${node_type}-${i}.ign: Static IP configured as $NODE_IP"
+      else
+        echo "❌ ${node_type}-${i}.ign: No static IP configuration found"
+      fi
+    else
+      echo "⚠️  ${node_type}-${i}.ign: File not found"
+    fi
+  done
+done
 
 # NEW: Show final cluster status
 echo ""
