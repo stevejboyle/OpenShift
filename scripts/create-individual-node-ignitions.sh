@@ -85,7 +85,7 @@ inject_static_ip() {
   
   echo "   Creating ${node_type} with IP ${ip}..."
   
-  # Create static IP file entry - only create the ens192 connection
+  # Create static IP file entry
   STATIC_IP_FILE='{
     "path": "/etc/NetworkManager/system-connections/ens192.nmconnection",
     "mode": 384,
@@ -95,15 +95,31 @@ inject_static_ip() {
     }
   }'
   
-  # Remove any existing NetworkManager connections and add our static IP config
+  # Build the ignition file with static IP configuration
+  # Since the base ignition might only have "ignition" key, we'll build the complete structure
   jq --argjson staticFile "$STATIC_IP_FILE" '
-    # Remove any existing system-connections files
-    .storage.files = [.storage.files[] | select(.path | contains("system-connections") | not)] |
-    # Add our static IP file
-    .storage.files += [$staticFile] |
-    # Ensure NetworkManager service is enabled
-    .systemd.units += [{"name": "NetworkManager.service", "enabled": true}] |
-    .systemd.units |= unique_by(.name)
+    # Start with the base ignition (preserves ignition version, etc.)
+    . as $base |
+    # Build the complete ignition structure
+    {
+      "ignition": $base.ignition,
+      "storage": {
+        "files": [
+          # Include any existing files that are not NetworkManager connections
+          ($base.storage.files // [] | map(select(.path | contains("system-connections") | not))),
+          # Add our static IP file
+          $staticFile
+        ] | flatten
+      },
+      "systemd": {
+        "units": [
+          # Include any existing systemd units
+          ($base.systemd.units // []),
+          # Add NetworkManager service
+          {"name": "NetworkManager.service", "enabled": true}
+        ] | flatten | unique_by(.name)
+      }
+    }
   ' "$base_ign" > "$target_ign"
   
   if ! jq empty "$target_ign" 2>/dev/null; then
@@ -113,7 +129,7 @@ inject_static_ip() {
   fi
   
   # Verify the static IP was injected
-  if jq '.storage.files[] | select(.path | contains("system-connections"))' "$target_ign" | grep -q "path"; then
+  if jq '.storage.files[]? | select(.path | contains("system-connections"))' "$target_ign" | grep -q "path"; then
     echo "✅ Static IP configuration verified in ${node_type}"
   else
     echo "❌ Static IP configuration NOT found in ${node_type}"
