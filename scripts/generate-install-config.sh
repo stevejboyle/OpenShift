@@ -1,96 +1,71 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ $# -ne 1 ]; then
-  echo "Usage: $0 <cluster.yaml>"
+# Usage: ./generate-install-config.sh <cluster-yaml>
+
+CLUSTER_YAML="$1"
+if [[ ! -f "$CLUSTER_YAML" ]]; then
+  echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
 
-CLUSTER_YAML="$(realpath "$1")"
-if [ ! -f "$CLUSTER_YAML" ]; then
-  echo "❌ Cluster file not found: $CLUSTER_YAML"
-  exit 1
-fi
-
-# Load govc credentials
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/load-vcenter-env.sh"
-
-# NEW: Ensure password is available
-if [[ -z "${GOVC_PASSWORD:-}" ]]; then
-  echo -n "🔐 GOVC_PASSWORD not set. Enter vSphere password for $GOVC_USERNAME: "
-  read -s GOVC_PASSWORD
-  echo
-  export GOVC_PASSWORD
-fi
-
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
-
-# Read cluster settings
-CN=$(yq -r '.clusterName'       "$CLUSTER_YAML")
-BD=$(yq -r '.baseDomain'        "$CLUSTER_YAML")
-PS=$(<"$(yq -r '.pullSecretFile' "$CLUSTER_YAML")")
-SK=$(<"$(yq -r '.sshKeyFile'     "$CLUSTER_YAML")")
-
-VC_SERVER=$(yq -r '.vcenter_server'   "$CLUSTER_YAML")
-VC_DC=$(yq -r '.vcenter_datacenter'   "$CLUSTER_YAML")
-VC_CLUSTER=$(yq -r '.vcenter_cluster' "$CLUSTER_YAML")
-VC_DS=$(yq -r '.vcenter_datastore'    "$CLUSTER_YAML")
-VC_NET=$(yq -r '.vcenter_network'     "$CLUSTER_YAML")
-NETWORK_CIDR=$(yq -r '.network.cidr'  "$CLUSTER_YAML")
-
-# Create cluster-specific directory
-INSTALL_DIR="${BASE_DIR}/install-configs/${CN}"
+SCRIPTS_DIR="$(dirname "$0")"
+BASE_DIR="$(dirname "$SCRIPTS_DIR")"
+CLUSTER_NAME="$(yq e '.clusterName' "$CLUSTER_YAML")"
+INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
 mkdir -p "$INSTALL_DIR"
 
-# FIXED: Use actual password instead of placeholder
-# Emit clean install-config.yaml
-cat > "${INSTALL_DIR}/install-config.yaml" <<EOF
+# Load fields from YAML
+BASE_DOMAIN="$(yq e '.baseDomain' "$CLUSTER_YAML")"
+VCENTER_SERVER="$(yq e '.vcenter_server' "$CLUSTER_YAML")"
+VCENTER_USERNAME="$(yq e '.vcenter_username' "$CLUSTER_YAML")"
+VCENTER_DATACENTER="$(yq e '.vcenter_datacenter' "$CLUSTER_YAML")"
+VCENTER_CLUSTER="$(yq e '.vcenter_cluster' "$CLUSTER_YAML")"
+VCENTER_DATASTORE="$(yq e '.vcenter_datastore' "$CLUSTER_YAML")"
+VCENTER_NETWORK="$(yq e '.vcenter_network' "$CLUSTER_YAML")"
+SSH_KEY="$(<"$(yq e '.sshKeyFile' "$CLUSTER_YAML")")"
+PULL_SECRET="$(<"$(yq e '.pullSecretFile' "$CLUSTER_YAML")")"
+
+# Full paths required for OpenShift installer
+CLUSTER_PATH="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER"
+DATASTORE_PATH="/$VCENTER_DATACENTER/datastore/$VCENTER_DATASTORE"
+
+cat > "$INSTALL_DIR/install-config.yaml" <<EOF
 apiVersion: v1
-baseDomain: ${BD}
+baseDomain: $BASE_DOMAIN
 metadata:
-  name: ${CN}
-compute:
-- name: worker
-  replicas: 0
-controlPlane:
-  name: master
-  replicas: 3
+  name: $CLUSTER_NAME
 platform:
   vsphere:
     vcenters:
-    - server: ${VC_SERVER}
-      user: ${GOVC_USERNAME}
-      password: ${GOVC_PASSWORD}
+    - server: $VCENTER_SERVER
+      user: $VCENTER_USERNAME
+      password: PLACEHOLDER_PASSWORD
       datacenters:
-      - ${VC_DC}
+      - $VCENTER_DATACENTER
     failureDomains:
     - name: primary
+      server: $VCENTER_SERVER
       region: region-a
       zone: zone-a
-      server: ${VC_SERVER}
       topology:
-        datacenter: ${VC_DC}
-        computeCluster: "/${VC_DC}/host/${VC_CLUSTER}"
-        datastore: "/${VC_DC}/datastore/${VC_DS}"
+        datacenter: $VCENTER_DATACENTER
+        computeCluster: $CLUSTER_PATH
+        datastore: $DATASTORE_PATH
         networks:
-        - ${VC_NET}
-networking:
-  machineNetwork:
-  - cidr: ${NETWORK_CIDR}
-  networkType: OVNKubernetes
-pullSecret: '${PS}'
+        - "$VCENTER_NETWORK"
+pullSecret: |
+  $PULL_SECRET
 sshKey: |
-  ${SK}
+  $SSH_KEY
+controlPlane:
+  name: master
+  replicas: 3
+compute:
+- name: worker
+  replicas: 0
 EOF
 
-echo "✅ install-config.yaml generated at: ${INSTALL_DIR}/install-config.yaml"
-echo "🔐 Password embedded directly (not placeholder)"
+echo "✅ Generated install-config.yaml at: $INSTALL_DIR/install-config.yaml"
+echo "⚠️  Remember to inject credentials later (via manifests or automation script)."
 
-# NEW: Validate the generated config
-echo "🔍 Validating generated config..."
-if grep -q "WILL_BE_SET_BY_ENVIRONMENT" "${INSTALL_DIR}/install-config.yaml"; then
-  echo "❌ Found placeholder in install-config.yaml - this will cause credential issues!"
-  exit 1
-fi
-echo "✅ No placeholders found in install-config.yaml"

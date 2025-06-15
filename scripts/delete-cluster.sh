@@ -1,77 +1,59 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-# Parse arguments
-FORCE_DELETE=false
-CLUSTER_YAML=""
-
-while [[ $# -gt 0 ]]; do
-  case $1 in
-    -f|--force)
-      FORCE_DELETE=true
-      shift
-      ;;
-    *)
-      CLUSTER_YAML="$(realpath "$1")"
-      shift
-      ;;
-  esac
-done
-
+CLUSTER_YAML="${1:-}"
 if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
-  echo "Usage: $0 [-f|--force] <cluster.yaml>"
-  echo "  -f, --force    Skip confirmation prompt"
-  echo "❌ Cluster file not found: $1"
+  echo "Usage: $0 <cluster.yaml>"
+  echo "❌ Cluster file not found: $CLUSTER_YAML"
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "${SCRIPT_DIR}/load-vcenter-env.sh"
-BASE_DIR="$(dirname "$SCRIPT_DIR")"
+SCRIPTS_DIR="$(dirname "$0")"
+source "${SCRIPTS_DIR}/load-vcenter-env.sh"
 
-# Get cluster name and construct VM folder path
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
-VMF="${GOVC_FOLDER}/${CLUSTER_NAME}"
+VM_FOLDER="${GOVC_FOLDER}/${CLUSTER_NAME}"
+DATASTORE="${GOVC_DATASTORE:?❌ GOVC_DATASTORE not set}"
+ISO_DIR="iso/${CLUSTER_NAME}"
 
-if [[ "$FORCE_DELETE" == "false" ]]; then
-  echo "⚠ WARNING: This will delete all VMs AND generated configs for ${CLUSTER_NAME}"
-  echo "Type DELETE to confirm:"
-  read CONFIRM
-  if [[ "$CONFIRM" != "DELETE" ]]; then
-    echo "Aborting."
-    exit 1
+VMS=(
+  "${CLUSTER_NAME}-bootstrap"
+  "${CLUSTER_NAME}-master-0"
+  "${CLUSTER_NAME}-master-1"
+  "${CLUSTER_NAME}-master-2"
+  "${CLUSTER_NAME}-worker-0"
+  "${CLUSTER_NAME}-worker-1"
+)
+
+echo "🧨 Deleting VMs for cluster: $CLUSTER_NAME"
+for vm in "${VMS[@]}"; do
+  if govc vm.info "$vm" &>/dev/null; then
+    echo "🔌 Powering off $vm (if running)..."
+    govc vm.power -off "$vm" -force || true
+
+    echo "🗑️  Destroying VM: $vm"
+    govc vm.destroy "$vm" || true
+  else
+    echo "⚠️  VM not found: $vm (already deleted)"
   fi
-else
-  echo "🗑 Force deleting cluster ${CLUSTER_NAME}..."
-fi
+done
 
-# Find and delete VMs in the cluster folder
-if govc ls "$VMF" &>/dev/null; then
-  for vm_path in $(govc find "$VMF" -type m); do
-    vm_name=$(basename "$vm_path")
-    echo "🗑 Deleting $vm_name..."
-    govc vm.power -off -force "$vm_path" || true
-    govc vm.destroy "$vm_path" || true
-  done
-  
-  # Remove the VM folder if it's empty after VM deletion
-  if govc ls "$VMF" &>/dev/null; then
-    # Check if folder is empty
-    folder_contents="$(govc ls "$VMF" 2>/dev/null || true)"
-    if [[ -z "$folder_contents" ]]; then
-      echo "🗑 Removing empty VM folder..."
-      govc object.destroy "$VMF" || true
-    else
-      echo "⚠ VM folder not empty, leaving: $VMF"
-    fi
-  fi
-else
-  echo "⚠ VM folder not found: $VMF"
-fi
+echo "🧹 Removing VM folder: $VM_FOLDER (if empty)..."
+govc object.destroy "$VM_FOLDER" || echo "⚠️  Folder not removed (may not exist or not empty)"
 
-# Don't delete shared template - it's reusable across clusters
-# The template at /Lab/vm/OpenShift/rhcos-template is shared and should be preserved
+echo "💿 Removing ISO files from datastore: $ISO_DIR"
+for vm in "${VMS[@]}"; do
+  ISO_PATH="[${DATASTORE}] ${ISO_DIR}/${vm}.iso"
+  govc datastore.rm "$ISO_PATH" || echo "⚠️  Could not delete $ISO_PATH (may not exist)"
+done
 
-# Remove cluster-specific generated install-configs
-rm -rf "${BASE_DIR}/install-configs/${CLUSTER_NAME}"
-echo "✅ Cluster VMs and generated files deleted."
+# Remove install-configs and manifests
+INSTALL_DIR="$(dirname "$CLUSTER_YAML")"
+CLUSTER_INSTALL_DIR="${INSTALL_DIR}/install-configs/${CLUSTER_NAME}"
+echo "🧽 Cleaning up install-config directory: $CLUSTER_INSTALL_DIR"
+rm -rf "$CLUSTER_INSTALL_DIR"
+
+echo "🧽 Cleaning up manifests: manifests/ and openshift/"
+rm -rf manifests/ openshift/ cluster-api/
+
+echo "✅ Cluster cleanup complete for: $CLUSTER_NAME"

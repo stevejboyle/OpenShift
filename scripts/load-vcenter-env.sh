@@ -1,33 +1,44 @@
 #!/usr/bin/env bash
-# Simple environment loader - no parameters needed
 set -euo pipefail
+
+# This script loads and exports vCenter credentials and connection info from govc.env
+# It also performs validation to ensure the credentials are usable.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
+GOVC_ENV_FILE="$BASE_DIR/govc.env"
 
-# Load govc environment
-if [[ -f "${BASE_DIR}/govc.env" ]]; then
-  source "${BASE_DIR}/govc.env"
-  echo "✅ vCenter environment loaded from govc.env"
-else
-  echo "❌ govc.env not found at ${BASE_DIR}/govc.env"
+if [ ! -f "$GOVC_ENV_FILE" ]; then
+  echo "❌ govc.env not found at: $GOVC_ENV_FILE"
   exit 1
 fi
 
-# Validate required variables
-if [[ -z "$GOVC_URL" || -z "$GOVC_USERNAME" ]]; then
-  echo "❌ Required GOVC environment variables not set"
+# Load environment variables
+set -a
+source "$GOVC_ENV_FILE"
+set +a
+
+if [ -z "${GOVC_USERNAME:-}" ]; then
+  echo "❌ GOVC_USERNAME is not set in govc.env"
   exit 1
 fi
 
-# NEW: Validate username format
-if [[ ! "$GOVC_USERNAME" =~ @.*\. ]]; then
-  echo "⚠️  Username should be in format user@domain.tld (current: $GOVC_USERNAME)"
+# Prompt for vSphere password securely if not already set
+if [ -z "${GOVC_PASSWORD:-}" ]; then
+  echo -n "🔐 Enter vSphere password for $GOVC_USERNAME: "
+  read -s GOVC_PASSWORD
+  echo
 fi
 
-# NEW: Check if password is set
-if [[ -z "${GOVC_PASSWORD:-}" ]]; then
-  echo "⚠️  GOVC_PASSWORD not set - will need to be provided when needed"
+export GOVC_PASSWORD
+export VSPHERE_USERNAME="$GOVC_USERNAME"
+export VSPHERE_PASSWORD="$GOVC_PASSWORD"
+
+# Optional: Validate connection
+if ! govc about >/dev/null 2>&1; then
+  echo "❌ Unable to connect to vCenter: $GOVC_URL"
+  echo "   Please verify GOVC_URL, GOVC_USERNAME, and GOVC_PASSWORD"
+  exit 1
 fi
 
-echo "📋 Loaded credentials for: $GOVC_USERNAME @ $(echo $GOVC_URL | sed 's|https://||')"
+echo "✅ Successfully loaded and validated vSphere credentials"
