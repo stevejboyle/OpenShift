@@ -82,6 +82,12 @@ echo "🌐 Creating individual node ignition files with static IPs..."
 echo "🌐 Creating individual node ignition files with static IPs..."
 "$SCRIPT_DIR/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
 
+echo "🌐 Creating individual node config ISOs..."
+./scripts/create-config-cdroms.sh "$CLUSTER_YAML"
+
+
+echo "🌐 Uploading config ISOs to vCenter..."
+./scripts/upload-isos.sh "$CLUSTER_YAML"
 echo "🚀 Deploying VMs..."
 "$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"
 
