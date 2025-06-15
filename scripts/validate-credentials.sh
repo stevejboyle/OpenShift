@@ -30,4 +30,18 @@ fi
 
 # Check for access to required resources
 MISSING=0
-for RESOURCE in "$GOVC_DATA_
+for RESOURCE in "$GOVC_DATACENTER" "$GOVC_CLUSTER" "$GOVC_DATASTORE" "$GOVC_NETWORK"; do
+  if ! govc ls "$RESOURCE" &>/dev/null; then
+    echo "❌ Cannot access vSphere resource: $RESOURCE"
+    MISSING=1
+  else
+    echo "✅ Found resource: $RESOURCE"
+  fi
+done
+
+if [[ "$MISSING" -ne 0 ]]; then
+  echo "❌ One or more required vSphere resources are inaccessible."
+  exit 1
+fi
+
+echo "🎉 vSphere credential validation successful!"

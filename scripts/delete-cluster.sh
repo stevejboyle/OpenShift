@@ -1,59 +1,47 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
-CLUSTER_YAML="${1:-}"
-if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
-  echo "Usage: $0 <cluster.yaml>"
-  echo "❌ Cluster file not found: $CLUSTER_YAML"
+CLUSTER_YAML="$1"
+if [[ -z "$CLUSTER_YAML" ]]; then
+  echo "❌ Usage: $0 <cluster-yaml>"
   exit 1
 fi
 
-SCRIPTS_DIR="$(dirname "$0")"
+SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+INSTALL_CONFIG_DIR="${SCRIPTS_DIR}/../install-configs"
+CLUSTER_NAME="$(basename "$CLUSTER_YAML" .yaml)"
+CLUSTER_DIR="${INSTALL_CONFIG_DIR}/${CLUSTER_NAME}"
+
 source "${SCRIPTS_DIR}/load-vcenter-env.sh"
 
-CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
-VM_FOLDER="${GOVC_FOLDER}/${CLUSTER_NAME}"
-DATASTORE="${GOVC_DATASTORE:?❌ GOVC_DATASTORE not set}"
-ISO_DIR="iso/${CLUSTER_NAME}"
+# Clean up previous artifacts
+"${SCRIPTS_DIR}/delete-cluster.sh" "$CLUSTER_YAML"
 
-VMS=(
-  "${CLUSTER_NAME}-bootstrap"
-  "${CLUSTER_NAME}-master-0"
-  "${CLUSTER_NAME}-master-1"
-  "${CLUSTER_NAME}-master-2"
-  "${CLUSTER_NAME}-worker-0"
-  "${CLUSTER_NAME}-worker-1"
-)
+# Generate install-config.yaml
+"${SCRIPTS_DIR}/generate-install-config.sh" "$CLUSTER_YAML"
 
-echo "🧨 Deleting VMs for cluster: $CLUSTER_NAME"
-for vm in "${VMS[@]}"; do
-  if govc vm.info "$vm" &>/dev/null; then
-    echo "🔌 Powering off $vm (if running)..."
-    govc vm.power -off "$vm" -force || true
+# Generate manifests
+mkdir -p "$CLUSTER_DIR"
+cp "${CLUSTER_DIR}/install-config.yaml" .
+openshift-install create manifests --dir "$CLUSTER_DIR" || echo "⚠️  Proceeding despite manifest warnings..."
 
-    echo "🗑️  Destroying VM: $vm"
-    govc vm.destroy "$vm" || true
-  else
-    echo "⚠️  VM not found: $vm (already deleted)"
-  fi
-done
+# Inject vSphere credentials manifest
+"${SCRIPTS_DIR}/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
+cp manifests/* "$CLUSTER_DIR/manifests/"
+cp openshift/* "$CLUSTER_DIR/manifests/"
 
-echo "🧹 Removing VM folder: $VM_FOLDER (if empty)..."
-govc object.destroy "$VM_FOLDER" || echo "⚠️  Folder not removed (may not exist or not empty)"
+# Generate static IP manifests and ignition files
+"${SCRIPTS_DIR}/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
+"${SCRIPTS_DIR}/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
 
-echo "💿 Removing ISO files from datastore: $ISO_DIR"
-for vm in "${VMS[@]}"; do
-  ISO_PATH="[${DATASTORE}] ${ISO_DIR}/${vm}.iso"
-  govc datastore.rm "$ISO_PATH" || echo "⚠️  Could not delete $ISO_PATH (may not exist)"
-done
+# Deploy the VMs
+"${SCRIPTS_DIR}/deploy-vms.sh" "$CLUSTER_YAML"
 
-# Remove install-configs and manifests
-INSTALL_DIR="$(dirname "$CLUSTER_YAML")"
-CLUSTER_INSTALL_DIR="${INSTALL_DIR}/install-configs/${CLUSTER_NAME}"
-echo "🧽 Cleaning up install-config directory: $CLUSTER_INSTALL_DIR"
-rm -rf "$CLUSTER_INSTALL_DIR"
+# Wait for bootstrap
+openshift-install wait-for bootstrap-complete --dir "$CLUSTER_DIR" --log-level debug
 
-echo "🧽 Cleaning up manifests: manifests/ and openshift/"
-rm -rf manifests/ openshift/ cluster-api/
+# Fix cloud provider issues
+"${SCRIPTS_DIR}/fix-cloud-provider-taints.sh" "$CLUSTER_DIR"
 
-echo "✅ Cluster cleanup complete for: $CLUSTER_NAME"
+# Wait for install completion
+openshift-install wait-for install-complete --dir "$CLUSTER_DIR" --log-level debug
