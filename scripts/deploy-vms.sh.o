@@ -10,6 +10,8 @@ fi
 
 SCRIPTS="$(dirname "$0")"
 source "${SCRIPTS}/load-vcenter-env.sh"
+: "${GOVC_DATASTORE:?❌ GOVC_DATASTORE not set. Check govc.env.}"
+DATASTORE="${GOVC_DATASTORE}"
 
 # NEW: Validate GOVC credentials work before proceeding
 echo "🔍 Validating vSphere connectivity..."
@@ -85,11 +87,16 @@ for vm in "${VMS[@]}"; do
 
   
   # Attach ignition config-drive ISO
-  CONFIG_ISO_PATH="[${DATASTORE}] iso/${CLUSTER_NAME}/${VM_NAME}.iso"
+  CONFIG_ISO_PATH="[${DATASTORE}] iso/${CLUSTER_NAME}/$vm.iso"
   echo "💿 Attaching ignition config ISO: $CONFIG_ISO_PATH"
-  govc device.cdrom.add -vm="$VM_NAME"
-  govc device.cdrom.insert -vm="$VM_NAME" "$CONFIG_ISO_PATH"
-  govc device.cdrom.connect -vm="$VM_NAME"
+  govc device.cdrom.add -vm="$vm"
+  govc device.cdrom.insert -vm="$vm" "$CONFIG_ISO_PATH"
+
+  # Ensure CD-ROM is first in boot order
+  BOOT_DISK="$(govc device.ls -vm "$vm" | grep -i 'cdrom' | head -n1)"
+  if [[ -n "$BOOT_DISK" ]]; then
+    govc device.boot -vm "$vm" -order "$BOOT_DISK"
+  fi
 
   govc vm.power -on "$vm"
 done

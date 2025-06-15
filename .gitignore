@@ -5,6 +5,7 @@ metadata.json
 *.ign
 *.backup
 *.openshift_install*
+*.iso
 
 # Sensitive Configuration Files
 govc.env

@@ -82,14 +82,22 @@ echo "🌐 Creating individual node ignition files with static IPs..."
 echo "🌐 Creating individual node ignition files with static IPs..."
 "$SCRIPT_DIR/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
 
-echo "🌐 Creating individual node config ISOs..."
-./scripts/create-config-cdroms.sh "$CLUSTER_YAML"
+echo "📦 Ensuring RHCOS live ISO is available in datastore..."
+RHCOS_ISO=$(yq -r '.rhcos_iso' "$CLUSTER_YAML")
+LOCAL_ISO_PATH="${BASE_DIR}/assets/${RHCOS_ISO}"
+REMOTE_ISO_PATH="iso/rhcos/${RHCOS_ISO}"
 
+if ! govc datastore.stat "$REMOTE_ISO_PATH" &>/dev/null; then
+  echo "   Uploading $RHCOS_ISO to $REMOTE_ISO_PATH..."
+  govc datastore.upload "$LOCAL_ISO_PATH" "$REMOTE_ISO_PATH"
+  echo "✅ Uploaded RHCOS live ISO"
+else
+  echo "✅ RHCOS live ISO already exists in datastore"
+fi
 
-echo "🌐 Uploading config ISOs to vCenter..."
-./scripts/upload-isos.sh "$CLUSTER_YAML"
 echo "🚀 Deploying VMs..."
-"$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"
+
+"$SCRIPT_DIR/deploy-vms-iso.sh" "$CLUSTER_YAML"
 
 echo "🎉 VM deployment complete!"
 

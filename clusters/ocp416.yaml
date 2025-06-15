@@ -10,6 +10,7 @@ vcenter_network: OpenShift_192.168.42.0
 sshKeyFile: assets/ssh-key.pub
 pullSecretFile: assets/pull-secret.json
 consolePasswordFile: assets/console-password.txt
+rhcos_iso: rhcos-4.16.36-x86_64-live.x86_64.iso
 network:
   cidr: 192.168.42.0/24
   gateway: 192.168.42.1
