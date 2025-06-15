@@ -85,15 +85,11 @@ for vm in "${VMS[@]}"; do
 
   
   # Attach ignition config-drive ISO
-  
-  
-  if [[ -n "${VM_NAME:-}" ]]; then
-    CONFIG_ISO_PATH="[${DATASTORE}] iso/${CLUSTER_NAME}/${VM_NAME}.iso"
-    echo "💿 Attaching ignition config ISO: $CONFIG_ISO_PATH"
-    govc device.cdrom.add -vm="$VM_NAME"
-    govc device.cdrom.insert -vm="$VM_NAME" "$CONFIG_ISO_PATH"
-    govc device.cdrom.connect -vm="$VM_NAME"
-  fi
+  CONFIG_ISO_PATH="[${DATASTORE}] iso/${CLUSTER_NAME}/${VM_NAME}.iso"
+  echo "💿 Attaching ignition config ISO: $CONFIG_ISO_PATH"
+  govc device.cdrom.add -vm="$VM_NAME"
+  govc device.cdrom.insert -vm="$VM_NAME" "$CONFIG_ISO_PATH"
+  govc device.cdrom.connect -vm="$VM_NAME"
 
   govc vm.power -on "$vm"
 done
