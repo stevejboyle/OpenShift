@@ -77,10 +77,10 @@ openshift-install create ignition-configs
 cd "$SCRIPT_DIR"
 
 echo "🌐 Creating individual node ignition files with static IPs..."
-"$SCRIPT_DIR/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
-
-echo "🌐 Injecting static IPs directly into ignition files..."
 "$SCRIPT_DIR/inject-static-ips-into-ignition.sh" "$CLUSTER_YAML"
+
+echo "🌐 Creating individual node ignition files with static IPs..."
+"$SCRIPT_DIR/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
 
 echo "🚀 Deploying VMs..."
 "$SCRIPT_DIR/deploy-vms.sh" "$CLUSTER_YAML"

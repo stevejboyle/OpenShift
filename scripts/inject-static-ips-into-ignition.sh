@@ -47,7 +47,6 @@ create_nm_config() {
 [connection]
 id=ens192
 type=ethernet
-interface-name=ens192
 autoconnect=true
 
 [ethernet]
@@ -165,6 +164,20 @@ EOF
   
   # Replace original file
   mv "${tmp_file}.2" "$ignition_file"
+
+  
+  
+  # Add debug systemd unit (pause + console output version)
+  jq --arg debug_unit "data:text/plain;charset=utf-8;base64,CltVbml0XQpEZXNjcmlwdGlvbj1QcmludCBzdGF0aWMgSVAgZGVidWcgaW5mbyB0byAvZGV2L2NvbnNvbGUgYW5kIHBhdXNlCkFmdGVyPW5ldHdvcmstb25saW5lLnRhcmdldApXYW50cz1uZXR3b3JrLW9ubGluZS50YXJnZXQKCltTZXJ2aWNlXQpUeXBlPW9uZXNob3QKRXhlY1N0YXJ0PS9iaW4vYmFzaCAtYyAnZWNobyAiLS0tIERFQlVHIFNUQVJUIC0tLSIgPiAvZGV2L2NvbnNvbGU7IGhvc3RuYW1lID4+IC9kZXYvY29uc29sZTsgaXAgYWRkciA+PiAvZGV2L2NvbnNvbGU7IG5tY2xpIGRldmljZSBzaG93ID4+IC9kZXYvY29uc29sZTsgZWNobyAiLS0tIERFQlVHIEVORCAtLS0iID4+IC9kZXYvY29uc29sZTsgcmVhZCAtdCA2MCAtcCAiUHJlc3MgRW50ZXIgdG8gY29udGludWUuLi4iIDwgL2Rldi9jb25zb2xlJwoKW0luc3RhbGxdCldhbnRlZEJ5PW11bHRpLXVzZXIudGFyZ2V0Cg==" \
+     '.systemd.units += [{
+       "name": "debug-static-ip.service",
+       "enabled": true,
+       "contents": $debug_unit
+     }]' "$ignition_file" > "${tmp_file}.debug"
+  mv "${tmp_file}.debug" "$ignition_file"
+
+
+
   rm -f "$tmp_file"
 }
 
