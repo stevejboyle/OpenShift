@@ -2,63 +2,61 @@
 set -euo pipefail
 
 CLUSTER_YAML="$1"
-if [[ -z "$CLUSTER_YAML" ]] || [[ ! -f "$CLUSTER_YAML" ]]; then
+if [[ -z "${CLUSTER_YAML:-}" || ! -f "$CLUSTER_YAML" ]]; then
   echo "Usage: $0 <cluster.yaml>"
-  echo "❌ Cluster file not found: $1"
   exit 1
 fi
 
+LOGFILE="/tmp/rebuild-cluster-$(basename "$CLUSTER_YAML" .yaml)-$(date +%s).log"
+exec > >(tee "$LOGFILE") 2>&1
+
+echo "🔁 Rebuilding cluster using config: $CLUSTER_YAML"
+START_TS=$(date +%s)
+
 SCRIPTS="$(dirname "$0")"
-BASE_DIR="$(cd "$SCRIPTS/.." && pwd)"
+source "${SCRIPTS}/load-vcenter-env.sh"
 
-# Load vSphere env
-source "$SCRIPTS/load-vcenter-env.sh"
+log_step() {
+  echo -e "\n⏱ $(date +'%Y-%m-%d %H:%M:%S') - $1"
+}
 
-# Cleanup old state
-"$SCRIPTS/delete-cluster.sh" "$CLUSTER_YAML"
+log_step "1️⃣ Validating vSphere credentials..."
+"${SCRIPTS}/validate-credentials.sh" "$CLUSTER_YAML"
 
-# Validate vSphere credentials
-"$SCRIPTS/validate-credentials.sh" "$CLUSTER_YAML"
+log_step "2️⃣ Deleting previous cluster (if exists)..."
+"${SCRIPTS}/delete-cluster.sh" "$CLUSTER_YAML"
 
-# Generate base install-config.yaml
-"$SCRIPTS/generate-install-config.sh" "$CLUSTER_YAML"
+log_step "3️⃣ Generating install-config.yaml..."
+"${SCRIPTS}/generate-install-config.sh" "$CLUSTER_YAML"
 
-# Generate manifests
-cd "$BASE_DIR/install-configs/$(yq '.clusterName' "$CLUSTER_YAML")"
-echo "🛠 Generating manifests..."
-openshift-install create manifests
+log_step "4️⃣ Creating manifests..."
+"${SCRIPTS}/deploy-cluster.sh" "$CLUSTER_YAML"
 
-# Inject vSphere credentials manifest (new step)
-echo "🔐 Injecting vSphere credentials secret..."
-"$SCRIPTS/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
+log_step "5️⃣ Injecting vSphere credentials into manifests..."
+"${SCRIPTS}/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
 
-# Optional: inject console password and cloud credentials
-"$SCRIPTS/generate-console-password-manifests.sh" "$CLUSTER_YAML"
-"$SCRIPTS/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
+log_step "6️⃣ Generating static IP manifests..."
+"${SCRIPTS}/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
 
-# Generate static IP NetworkManager configs
-"$SCRIPTS/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
+log_step "7️⃣ Creating individual ignition files..."
+"${SCRIPTS}/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
 
-# Create Ignition configs
-echo "📦 Creating Ignition configs..."
-openshift-install create ignition-configs
+log_step "8️⃣ Creating config-drive ISO images..."
+"${SCRIPTS}/create-config-cdroms.sh" "$CLUSTER_YAML"
 
-# Create per-node ignition files with static IPs
-"$SCRIPTS/create-individual-node-ignitions.sh" "$CLUSTER_YAML"
+log_step "9️⃣ Deploying VMs..."
+"${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML"
 
-# Deploy VMs with ignition configs
-"$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
+log_step "🔟 Monitoring bootstrap progress..."
+"${SCRIPTS}/monitor-bootstrap.sh" "$CLUSTER_YAML" || echo "⚠️ Bootstrap may have failed"
 
-# Wait for bootstrap to complete
-openshift-install wait-for bootstrap-complete --log-level debug
+log_step "🔁 Fixing cloud provider taints..."
+"${SCRIPTS}/fix-cloud-provider-taints.sh" "$CLUSTER_YAML" || echo "⚠️ Taint fix may have failed"
 
-# Fix cloud provider taints
-"$SCRIPTS/fix-cloud-provider-taints.sh" "$BASE_DIR/install-configs/$(yq '.clusterName' "$CLUSTER_YAML")"
+log_step "✅ Validating deployed credentials..."
+"${SCRIPTS}/validate-credentials.sh" "$CLUSTER_YAML"
 
-# Wait for install to complete
-openshift-install wait-for install-complete --log-level debug
-
-# Validate deployed credentials
-"$SCRIPTS/validate-credentials.sh" "$CLUSTER_YAML"
-
-echo "✅ Cluster $(yq '.clusterName' "$CLUSTER_YAML") deployed successfully."
+END_TS=$(date +%s)
+DURATION=$((END_TS - START_TS))
+echo -e "\n🎉 Rebuild complete in $((DURATION / 60))m $((DURATION % 60))s"
+echo "📄 Full log saved at: $LOGFILE"
