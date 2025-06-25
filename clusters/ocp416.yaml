@@ -4,8 +4,8 @@ vcenter_server: vcenter1.sboyle.internal
 vcenter_username: administrator@vsphere.sboyle.internal
 vcenter_password: SuperSecret123
 vcenter_datacenter: Lab
-vcenter_cluster: /Lab/host/Lab Cluster
-vcenter_datastore: /Lab/datastore/datastore-SAN1
+vcenter_cluster: Lab Cluster
+vcenter_datastore: datastore-SAN1
 vcenter_network: OpenShift_192.168.42.0
 sshKeyFile: assets/ssh-key.pub
 pullSecretFile: assets/pull-secret.json
