@@ -15,11 +15,11 @@ echo "✅ Successfully loaded and validated vSphere credentials"
 # Read cluster config
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 DATASTORE="${GOVC_DATASTORE}"
-VMF="${GOVC_FOLDER}/${CLUSTER_NAME}"
+VMF="${GOVC_FOLDER}/${CLUSTER_NAME}" # Assuming GOVC_FOLDER is defined, else this might be empty
 ISO_FOLDER="[${DATASTORE}] iso/${CLUSTER_NAME}"
 MANIFEST_DIR="./install-configs/${CLUSTER_NAME}"
 
-# Define VMs
+# Define VMs (adjust if you change worker count or names)
 VMS=("${CLUSTER_NAME}-bootstrap" "${CLUSTER_NAME}-master-0" "${CLUSTER_NAME}-master-1" "${CLUSTER_NAME}-master-2" "${CLUSTER_NAME}-worker-0" "${CLUSTER_NAME}-worker-1")
 
 echo "🛑 Shutting down and deleting VMs (if exist)..."
@@ -39,7 +39,7 @@ done
 echo "🧼 Removing folder $VMF (if exists)..."
 govc object.destroy "$VMF" || echo "⚠️ Folder not found or already removed: $VMF"
 
-# Delete ISOs
+# Delete ISOs from datastore (if exists)
 echo "🗑 Deleting ISOs from $ISO_FOLDER..."
 if govc datastore.ls "$ISO_FOLDER" &>/dev/null; then
   govc datastore.rm -f "$ISO_FOLDER" || echo "⚠️ Could not remove ISO directory"
@@ -47,7 +47,7 @@ else
   echo "ℹ️ ISO directory not found"
 fi
 
-# Delete manifests and install configs
+# Delete manifests and install configs locally
 echo "🗑 Deleting manifests and install-configs for $CLUSTER_NAME..."
 rm -rf "${MANIFEST_DIR:?}" || echo "⚠️ Could not remove install-configs/${CLUSTER_NAME}"
 

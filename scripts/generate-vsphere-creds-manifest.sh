@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 CLUSTER_YAML="$1"
-if [[ -z "$CLUSTER_YAML" ]]; then
+if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Usage: $0 <cluster-yaml>"
   exit 1
 fi
 
 SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
-CLUSTER_NAME="$(basename "$CLUSTER_YAML" .yaml)"
-CLUSTER_DIR="${SCRIPTS_DIR}/../install-configs/${CLUSTER_NAME}"
-MANIFEST_DIR="${CLUSTER_DIR}/manifests"
 
-VC_USERNAME=$(yq '.vcenter_username' "$CLUSTER_YAML")
-VC_PASSWORD=$(yq '.vcenter_password' "$CLUSTER_YAML")
+# Source load-vcenter-env.sh to ensure GOVC_USERNAME and GOVC_PASSWORD are set
+# This script is responsible for securely prompting for the password.
+source "${SCRIPTS_DIR}/load-vcenter-env.sh"
 
-if [[ -z "$VC_USERNAME" || -z "$VC_PASSWORD" ]]; then
-  echo "❌ Missing vCenter credentials in cluster YAML"
+# Now, GOVC_USERNAME and GOVC_PASSWORD should be available in the environment.
+# Check if they are set (though load-vcenter-env.sh should handle this).
+if [[ -z "${GOVC_USERNAME:-}" || -z "${GOVC_PASSWORD:-}" ]]; then
+  echo "❌ vCenter credentials (GOVC_USERNAME or GOVC_PASSWORD) are not set in the environment."
+  echo "   Ensure load-vcenter-env.sh is correctly setting them."
   exit 1
 fi
+
+CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
+MANIFEST_DIR="${SCRIPTS_DIR}/../install-configs/${CLUSTER_NAME}/manifests"
 
 mkdir -p "$MANIFEST_DIR"
 
@@ -30,8 +34,8 @@ metadata:
   namespace: openshift-machine-api
 type: Opaque
 data:
-  username: $(echo -n "$VC_USERNAME" | base64)
-  password: $(echo -n "$VC_PASSWORD" | base64)
+  username: $(echo -n "$GOVC_USERNAME" | base64)
+  password: $(echo -n "$GOVC_PASSWORD" | base64)
 EOF
 
 echo "✅ Generated vSphere credentials secret manifest at: ${MANIFEST_DIR}/vsphere-creds-secret.yaml"

@@ -19,12 +19,16 @@ PASSWORD_FILE=$(yq eval '.consolePasswordFile' "$CLUSTER_YAML")
 
 if [[ ! -f "$PASSWORD_FILE" ]]; then
   echo "❌ Console password hash file not found: $PASSWORD_FILE"
+  echo "   Please ensure '$PASSWORD_FILE' exists and contains the htpasswd hash (e.g., admin:\$apr1\$...). Read documentation for htpasswd."
   exit 1
 fi
 
 echo "🔐 Generating admin password secret for web console..."
 
 mkdir -p "${INSTALL_DIR}/manifests"
+
+# Read the htpasswd hash directly from the file
+HTPASSWD_CONTENT=$(cat "$PASSWORD_FILE")
 
 cat > "${INSTALL_DIR}/manifests/99_openshift-cluster-admin-password-secret.yaml" <<EOF
 apiVersion: v1
@@ -35,7 +39,7 @@ metadata:
 type: Opaque
 stringData:
   htpasswd: |
-    admin:$(cat "$PASSWORD_FILE")
+    ${HTPASSWD_CONTENT}
 EOF
 
 cat > "${INSTALL_DIR}/manifests/99_openshift-cluster-admin-oauth.yaml" <<EOF
@@ -54,4 +58,3 @@ spec:
 EOF
 
 echo "✅ Console password manifests created in: ${INSTALL_DIR}/manifests"
-

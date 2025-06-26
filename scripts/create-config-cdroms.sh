@@ -34,17 +34,20 @@ if [[ ${#IGN_FILES[@]} -eq 0 ]]; then
   exit 1
 fi
 
+# Add trap for temporary directory cleanup
+# This ensures that the TEMP_DIR is removed even if the script exits unexpectedly.
+TEMP_DIR_GLOBAL=$(mktemp -d)
+trap "rm -rf '$TEMP_DIR_GLOBAL'" EXIT
+
 for IGN in "${IGN_FILES[@]}"; do
   BASENAME=$(basename "$IGN" .ign)
   ISO_PATH="${ISO_OUTPUT_DIR}/${BASENAME}.iso"
-  TEMP_DIR=$(mktemp -d)
 
-  cp "$IGN" "${TEMP_DIR}/config.ign"
+  cp "$IGN" "${TEMP_DIR_GLOBAL}/config.ign"
 
   echo "   📦 Creating ISO for $BASENAME..."
-  "$MKISOFS" -quiet -V config-2 -o "$ISO_PATH" -r "${TEMP_DIR}/config.ign"
+  "$MKISOFS" -quiet -V config-2 -o "$ISO_PATH" -r "${TEMP_DIR_GLOBAL}/config.ign"
 
-  rm -rf "$TEMP_DIR"
 done
 
 echo "✅ Config ISOs generated in: ${ISO_OUTPUT_DIR}"

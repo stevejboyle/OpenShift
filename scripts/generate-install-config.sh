@@ -26,6 +26,11 @@ VCENTER_NETWORK="$(yq e '.vcenter_network' "$CLUSTER_YAML")"
 SSH_KEY="$(<"$(yq e '.sshKeyFile' "$CLUSTER_YAML")")"
 PULL_SECRET="$(<"$(yq e '.pullSecretFile' "$CLUSTER_YAML")")"
 
+# Network details from YAML
+NETWORK_CIDR=$(yq e '.network.cidr' "$CLUSTER_YAML")
+# NETWORK_GATEWAY=$(yq e '.network.gateway' "$CLUSTER_YAML") # Not directly used in install-config networking block
+# DNS_SERVERS=$(yq e '.network.dns_servers[]' "$CLUSTER_YAML" | sed 's/^/- /') # Not directly used in install-config networking block
+
 # Full paths required for OpenShift installer
 CLUSTER_PATH="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER"
 DATASTORE_PATH="/$VCENTER_DATACENTER/datastore/$VCENTER_DATASTORE"
@@ -64,8 +69,16 @@ controlPlane:
 compute:
 - name: worker
   replicas: 0
+networking:
+  clusterNetwork:
+  - cidr: 10.128.0.0/14 # Default OpenShift cluster network
+    hostPrefix: 23
+  machineNetwork:
+  - cidr: $NETWORK_CIDR # Use the CIDR from your cluster YAML
+  networkType: OVNKubernetes
+  serviceNetwork:
+  - 172.30.0.0/16 # Default OpenShift service network
 EOF
 
 echo "✅ Generated install-config.yaml at: $INSTALL_DIR/install-config.yaml"
-echo "⚠️  Remember to inject credentials later (via manifests or automation script)."
-
+echo "⚠️  Remember to inject vSphere credentials into manifests later (via generate-vsphere-creds-manifest.sh)."

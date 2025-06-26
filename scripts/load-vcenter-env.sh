@@ -3,7 +3,6 @@ set -euo pipefail
 
 # This script loads and exports vCenter credentials and connection info from govc.env
 # It also performs validation to ensure the credentials are usable.
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPT_DIR")"
 GOVC_ENV_FILE="$BASE_DIR/govc.env"
