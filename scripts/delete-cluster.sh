@@ -15,21 +15,39 @@ echo "✅ Successfully loaded and validated vSphere credentials"
 # Read cluster config
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 DATASTORE="${GOVC_DATASTORE}"
-VMF="${GOVC_FOLDER}/${CLUSTER_NAME}" # Assuming GOVC_FOLDER is defined, else this might be empty
+# Construct the full path for the cluster's VM folder based on GOVC_FOLDER
+# Example: /Lab/vm/OpenShift/ocp416
+VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}"
+VMF="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
+
 ISO_FOLDER="[${DATASTORE}] iso/${CLUSTER_NAME}"
 MANIFEST_DIR="./install-configs/${CLUSTER_NAME}"
 
-# Define VMs (adjust if you change worker count or names)
-VMS=("${CLUSTER_NAME}-bootstrap" "${CLUSTER_NAME}-master-0" "${CLUSTER_NAME}-master-1" "${CLUSTER_NAME}-master-2" "${CLUSTER_NAME}-worker-0" "${CLUSTER_NAME}-worker-1")
+# --- NEW: Dynamically build VMS array from cluster YAML ---
+MASTER_REPLICAS=$(yq eval '.node_counts.master' "$CLUSTER_YAML")
+WORKER_REPLICAS=$(yq eval '.node_counts.worker' "$CLUSTER_YAML")
 
-echo "🛑 Shutting down and deleting VMs (if exist)..."
+VMS=("${CLUSTER_NAME}-bootstrap") # Bootstrap node is always present
+
+for i in $(seq 0 $((MASTER_REPLICAS - 1))); do
+  VMS+=("${CLUSTER_NAME}-master-${i}")
+done
+
+for i in $(seq 0 $((WORKER_REPLICAS - 1))); do
+  VMS+=("${CLUSTER_NAME}-worker-${i}")
+done
+
+echo "🛑 Shutting down and deleting VMs: ${VMS[@]} (if exist)..."
+# --- END NEW NODE BUILD ---
+
 for vm in "${VMS[@]}"; do
   if govc vm.info "$vm" &>/dev/null; then
     echo "⚙️ Powering off $vm (if powered on)..."
     govc vm.power -off "$vm" || true
 
     echo "🧹 Destroying $vm..."
-    govc vm.destroy "$vm" || echo "⚠️ Failed to delete $vm (may not exist)"
+    # Ensure to use the full path for destruction to avoid ambiguity
+    govc vm.destroy -vm.ipath="${VMF}/${vm}" || echo "⚠️ Failed to delete $vm (may not exist)"
   else
     echo "ℹ️ VM $vm does not exist, skipping"
   fi

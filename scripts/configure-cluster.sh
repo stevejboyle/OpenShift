@@ -9,25 +9,15 @@ fi
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load environment and validate credentials (this is handled by the master script now)
-# source "${SCRIPTS_DIR}/load-vcenter-env.sh"
-# echo "✅ vSphere credentials loaded"
+CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
+INSTALL_DIR="install-configs/${CLUSTER_NAME}"
 
-# Generate install-config.yaml (This is called before this script in the master script)
-# "${SCRIPTS_DIR}/generate-install-config.sh" "$CLUSTER_YAML"
-
-# Create manifests
+# Generate manifests
 echo "🛠 Generating OpenShift manifests..."
-openshift-install create manifests --dir="install-configs/$(yq '.clusterName' "$CLUSTER_YAML")"
-
-# Inject vSphere credentials into manifests (This is called after this script in the master script)
-# "${SCRIPTS_DIR}/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
-
-# Inject console password (This is called after this script in the master script)
-# "${SCRIPTS_DIR}/generate-console-password-manifests.sh" "$CLUSTER_YAML"
+openshift-install create manifests --dir="${INSTALL_DIR}"
 
 # Create ignition configs
 echo "📦 Creating ignition configs..."
-openshift-install create ignition-configs --dir="install-configs/$(yq '.clusterName' "$CLUSTER_YAML")"
+openshift-install create ignition-configs --dir="${INSTALL_DIR}"
 
 echo "✅ Cluster configuration complete"

@@ -9,6 +9,7 @@ vcenter_datacenter: Lab
 vcenter_cluster: "Lab Cluster" 
 vcenter_datastore: datastore-SAN1 
 vcenter_network: OpenShift_192.168.42.0
+vcenter_ca_cert_file: assets/vcenter-ca.crt
 
 sshKeyFile: assets/ssh-key.pub # Path to your SSH public key
 pullSecretFile: assets/pull-secret.json # Path to your pull secret JSON
@@ -16,6 +17,10 @@ consolePasswordFile: assets/console-password.txt # Path to your htpasswd hash fi
 
 rhcos_iso: rhcos-4.16.36-x86_64-live.x86_64.iso # Only the filename, assumes it's in assets/
 rhcos_live_iso_path: iso/rhcos/rhcos-4.16.36-x86_64-live.x86_64.iso # Remote path in vCenter datastore for live ISO
+
+node_counts:
+  master: 3
+  worker: 2 # Set to your desired initial worker count
 
 # VM Sizing for different node types
 vm_sizing:
@@ -61,3 +66,7 @@ node_macs:
   # or you can specify them here if you want DHCP reservations for workers too.
   # worker-0: "00:50:56:XX:YY:05"
   # worker-1: "00:50:56:XX:YY:06"
+
+ignition_server:
+  host_ip: 192.168.11.192 # The IP address of the machine running your deployment scripts (the HTTP server)
+  port: 8080 # Port for the HTTP server

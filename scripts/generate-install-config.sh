@@ -28,8 +28,19 @@ PULL_SECRET="$(<"$(yq e '.pullSecretFile' "$CLUSTER_YAML")")"
 
 # Network details from YAML
 NETWORK_CIDR=$(yq e '.network.cidr' "$CLUSTER_YAML")
-# NETWORK_GATEWAY=$(yq e '.network.gateway' "$CLUSTER_YAML") # Not directly used in install-config networking block
-# DNS_SERVERS=$(yq e '.network.dns_servers[]' "$CLUSTER_YAML" | sed 's/^/- /') # Not directly used in install-config networking block
+
+# Ignition Server details from YAML
+IGNITION_SERVER_IP=$(yq e '.ignition_server.host_ip' "$CLUSTER_YAML")
+IGNITION_SERVER_PORT=$(yq e '.ignition_server.port' "$CLUSTER_YAML")
+
+# --- NEW: Read vCenter CA Certificate File Path from cluster YAML ---
+VCENTER_CA_CERT_FILE_PATH=$(yq e '.vcenter_ca_cert_file' "$CLUSTER_YAML")
+if [[ ! -f "$VCENTER_CA_CERT_FILE_PATH" ]]; then
+  echo "❌ vCenter CA certificate file not found: $VCENTER_CA_CERT_FILE_PATH"
+  echo "   Please ensure the path in your cluster YAML is correct and the file exists."
+  exit 1
+fi
+VCENTER_CA_CERT="$(<"$VCENTER_CA_CERT_FILE_PATH")" # Read the certificate content
 
 # Full paths required for OpenShift installer
 CLUSTER_PATH="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER"
@@ -59,6 +70,9 @@ platform:
         datastore: $DATASTORE_PATH
         networks:
         - "$VCENTER_NETWORK"
+# Add the vCenter CA certificate bundle here
+additionalTrustBundle: |
+  $VCENTER_CA_CERT
 pullSecret: |
   $PULL_SECRET
 sshKey: |
@@ -71,13 +85,16 @@ compute:
   replicas: 0
 networking:
   clusterNetwork:
-  - cidr: 10.128.0.0/14 # Default OpenShift cluster network
+  - cidr: 10.128.0.0/14
     hostPrefix: 23
   machineNetwork:
-  - cidr: $NETWORK_CIDR # Use the CIDR from your cluster YAML
+  - cidr: $NETWORK_CIDR
   networkType: OVNKubernetes
   serviceNetwork:
-  - 172.30.0.0/16 # Default OpenShift service network
+  - 172.30.0.0/16
+ignition:
+  version: 3.2.0
+  url: http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${CLUSTER_NAME}/bootstrap.ign
 EOF
 
 echo "✅ Generated install-config.yaml at: $INSTALL_DIR/install-config.yaml"

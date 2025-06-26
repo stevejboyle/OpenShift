@@ -12,6 +12,8 @@ govc.env
 assets/pull-secret.json
 assets/console-password.txt
 assets/core-user-password.txt
+.vcenterpw
+assets/*.crt
 
 # SSH Keys (keep public keys, ignore private)
 assets/*id_rsa
