@@ -30,7 +30,7 @@ if [[ ! -f "$SSH_KEY_FILE_PATH" ]]; then echo "❌ SSH key file not found: $SSH_
 SSH_KEY=$(<"$SSH_KEY_FILE_PATH")
 echo "DEBUG: SSH_KEY_LENGTH=${#SSH_KEY} bytes"
 
-PULL_SECRET_FILE_PATH=$(yq e '.pullSecretFile' "$CLUSTER_YAML" || { echo "❌ Failed to read pullSecretFile path from $CLUSTER_YAML"; exit 1; }
+PULL_SECRET_FILE_PATH=$(yq e '.pullSecretFile' "$CLUSTER_YAML" || { echo "❌ Failed to read pullSecretFile path from $CLUSTER_YAML"; exit 1; })
 if [[ ! -f "$PULL_SECRET_FILE_PATH" ]]; then echo "❌ Pull secret file not found: $PULL_SECRET_FILE_PATH"; exit 1; fi
 PULL_SECRET=$(<"$PULL_SECRET_FILE_PATH")
 echo "DEBUG: PULL_SECRET_LENGTH=${#PULL_SECRET} bytes"
@@ -94,7 +94,7 @@ platform:
         networks:
         - "$VCENTER_NETWORK"
   additionalTrustBundle: |
-    $(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | eval "$VCENTER_CA_CERT_AWK_CMD") # Process cert directly here
+$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | eval "$VCENTER_CA_CERT_AWK_CMD") # Process cert directly here
 pullSecret: |
   $PULL_SECRET
 sshKey: |
