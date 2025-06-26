@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CLUSTER_YAML="$1"
-if [[ ! -f "$CLUSTER_YAML" ]]; then
+if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
@@ -17,21 +17,27 @@ source "${SCRIPTS_DIR}/load-vcenter-env.sh" "$CLUSTER_YAML"
 : "${VCENTER_DATASTORE:=${GOVC_DATASTORE}}"
 : "${VCENTER_CLUSTER:=${GOVC_CLUSTER}}"
 : "${VCENTER_DATACENTER:=${GOVC_DATACENTER}}"
-: "${VCENTER_FOLDER:=$(yq eval '.clusterName' "$CLUSTER_YAML")}"
 
-INSTALL_DIR="install-configs/$(yq eval '.clusterName' "$CLUSTER_YAML")"
+# Define the VM folder name based on clusterName from YAML
 CLUSTER_NAME="$(yq eval '.clusterName' "$CLUSTER_YAML")"
+VM_FOLDER_NAME="${CLUSTER_NAME}" # e.g., ocp416
+
+# Construct the full path for the VM folder within the datacenter.
+# This assumes you want it directly under /<DatacenterName>/vm/
+FULL_VCENTER_VM_FOLDER_PATH="/${VCENTER_DATACENTER}/vm/${VM_FOLDER_NAME}"
+
+# Read the remote path for the RHCOS Live ISO from cluster YAML
 RHCOS_LIVE_ISO_PATH_FROM_YAML="$(yq eval '.rhcos_live_iso_path' "$CLUSTER_YAML")"
+# Construct the full remote path to the RHCOS live ISO in the datastore
 RHCOS_REMOTE_ISO="/${GOVC_DATACENTER}/datastore/${GOVC_DATASTORE}/${RHCOS_LIVE_ISO_PATH_FROM_YAML}"
 
-
 # Ensure VM folder exists
-echo "🔍 Checking for VM folder: $VCENTER_FOLDER..."
-if ! govc folder.info "$VCENTER_FOLDER" &>/dev/null; then
-  echo "📁 VM folder does not exist, creating: $VCENTER_FOLDER"
-  govc folder.create "$VCENTER_FOLDER"
+echo "🔍 Checking for VM folder: ${FULL_VCENTER_VM_FOLDER_PATH}..."
+if ! govc folder.info "${FULL_VCENTER_VM_FOLDER_PATH}" &>/dev/null; then
+  echo "📁 VM folder does not exist, creating: ${FULL_VCENTER_VM_FOLDER_PATH}"
+  govc folder.create "${FULL_VCENTER_VM_FOLDER_PATH}"
 else
-  echo "✅ VM folder exists: $VCENTER_FOLDER"
+  echo "✅ VM folder exists: ${FULL_VCENTER_VM_FOLDER_PATH}"
 fi
 
 NODES=(
@@ -47,7 +53,8 @@ echo "⏱ $(date '+%Y-%m-%d %H:%M:%S') - 🚀 Deploying VMs..."
 
 for node in "${NODES[@]}"; do
   vm_name="${CLUSTER_NAME}-$node"
-  ignition_file="$INSTALL_DIR/$node.ign"
+  ignition_file="$INSTALL_DIR/$node.ign" # Assuming INSTALL_DIR is set upstream (e.g., in rebuild-cluster.sh)
+                                         # or within this script if needed, but it's relative here.
 
   # Determine sizing based on node type
   CPU=4
@@ -55,37 +62,26 @@ for node in "${NODES[@]}"; do
   DISK_GB=120
   VM_MAC="" # Initialize MAC variable
 
-  if [[ "$node" == "bootstrap" ]]; then
-    CPU=$(yq eval '.vm_sizing.bootstrap.cpu' "$CLUSTER_YAML")
-    MEMORY_GB=$(yq eval '.vm_sizing.bootstrap.memory_gb' "$CLUSTER_YAML")
-    DISK_GB=$(yq eval '.vm_sizing.bootstrap.disk_gb' "$CLUSTER_YAML")
-    VM_MAC=$(yq eval ".node_macs.bootstrap" "$CLUSTER_YAML" || true)
-  elif [[ "$node" == "master-0" ]]; then
-    CPU=$(yq eval '.vm_sizing.master.cpu' "$CLUSTER_YAML")
-    MEMORY_GB=$(yq eval '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
-    DISK_GB=$(yq eval '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
-    VM_MAC=$(yq eval ".node_macs.\"master-0\"" "$CLUSTER_YAML" || true)
-  elif [[ "$node" == "master-1" ]]; then
-    CPU=$(yq eval '.vm_sizing.master.cpu' "$CLUSTER_YAML")
-    MEMORY_GB=$(yq eval '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
-    DISK_GB=$(yq eval '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
-    VM_MAC=$(yq eval ".node_macs.\"master-1\"" "$CLUSTER_YAML" || true)
-  elif [[ "$node" == "master-2" ]]; then
-    CPU=$(yq eval '.vm_sizing.master.cpu' "$CLUSTER_YAML")
-    MEMORY_GB=$(yq eval '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
-    DISK_GB=$(yq eval '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
-    VM_MAC=$(yq eval ".node_macs.\"master-2\"" "$CLUSTER_YAML" || true)
-  elif [[ "$node" == "worker-0" ]]; then
-    CPU=$(yq eval '.vm_sizing.worker.cpu' "$CLUSTER_YAML")
-    MEMORY_GB=$(yq eval '.vm_sizing.worker.memory_gb' "$CLUSTER_YAML")
-    DISK_GB=$(yq eval('.vm_sizing.worker.disk_gb') "$CLUSTER_YAML")
-    VM_MAC=$(yq eval ".node_macs.\"worker-0\"" "$CLUSTER_YAML" || true) # Optional: if workers also have pre-assigned MACs
-  elif [[ "$node" == "worker-1" ]]; then
-    CPU=$(yq eval '.vm_sizing.worker.cpu' "$CLUSTER_YAML")
-    MEMORY_GB=$(yq eval('.vm_sizing.worker.memory_gb') "$CLUSTER_YAML")
-    DISK_GB=$(yq eval('.vm_sizing.worker.disk_gb') "$CLUSTER_YAML")
-    VM_MAC=$(yq eval ".node_macs.\"worker-1\"" "$CLUSTER_YAML" || true) # Optional: if workers also have pre-assigned MACs
-  fi
+  case "$node" in
+    "bootstrap")
+      CPU=$(yq eval '.vm_sizing.bootstrap.cpu' "$CLUSTER_YAML")
+      MEMORY_GB=$(yq eval '.vm_sizing.bootstrap.memory_gb' "$CLUSTER_YAML")
+      DISK_GB=$(yq eval '.vm_sizing.bootstrap.disk_gb' "$CLUSTER_YAML")
+      VM_MAC=$(yq eval ".node_macs.bootstrap" "$CLUSTER_YAML" || true)
+      ;;
+    "master-0"|"master-1"|"master-2")
+      CPU=$(yq eval '.vm_sizing.master.cpu' "$CLUSTER_YAML")
+      MEMORY_GB=$(yq eval '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
+      DISK_GB=$(yq eval '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
+      VM_MAC=$(yq eval ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
+      ;;
+    "worker-0"|"worker-1") # Extend this logic for more workers as needed
+      CPU=$(yq eval '.vm_sizing.worker.cpu' "$CLUSTER_YAML")
+      MEMORY_GB=$(yq eval '.vm_sizing.worker.memory_gb' "$CLUSTER_YAML")
+      DISK_GB=$(yq eval '.vm_sizing.worker.disk_gb' "$CLUSTER_YAML")
+      VM_MAC=$(yq eval ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true) # Optional: if workers also have pre-assigned MACs
+      ;;
+  esac
 
   echo "Creating VM: $vm_name with ${CPU} vCPUs, ${MEMORY_GB}GB RAM, ${DISK_GB}GB Disk."
   if [[ -n "$VM_MAC" ]]; then
@@ -95,7 +91,7 @@ for node in "${NODES[@]}"; do
   fi
 
   # Safely destroy VM if it exists
-  govc vm.destroy -vm.ipath="/$VCENTER_DATACENTER/vm/$VCENTER_FOLDER/$vm_name" 2>/dev/null || true
+  govc vm.destroy -vm.ipath="${FULL_VCENTER_VM_FOLDER_PATH}/${vm_name}" 2>/dev/null || true
 
   # Build govc vm.create command dynamically with MAC if provided
   GOVC_CREATE_CMD=(
@@ -109,7 +105,7 @@ for node in "${NODES[@]}"; do
     -iso="${RHCOS_REMOTE_ISO}"
     -pool="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER/Resources"
     -ds="$VCENTER_DATASTORE"
-    -folder="$VCENTER_FOLDER"
+    -folder="${FULL_VCENTER_VM_FOLDER_PATH}"
   )
 
   # Add MAC address parameter if VM_MAC is not empty
