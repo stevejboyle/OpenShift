@@ -25,6 +25,14 @@ VCENTER_CLUSTER=$(yq e '.vcenter_cluster' "$CLUSTER_YAML" || { echo "❌ Failed 
 VCENTER_DATASTORE=$(yq e '.vcenter_datastore' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_datastore from $CLUSTER_YAML"; exit 1; })
 VCENTER_NETWORK=$(yq e '.vcenter_network' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_network from $CLUSTER_YAML"; exit 1; })
 
+# Use GOVC_PASSWORD from environment
+if [[ -z "${GOVC_PASSWORD:-}" ]]; then
+  echo "❌ GOVC_PASSWORD environment variable is not set."
+  echo "   Ensure load-vcenter-env.sh was sourced correctly before calling this script."
+  exit 1
+fi
+echo "DEBUG: GOVC_PASSWORD_LENGTH=${#GOVC_PASSWORD} bytes"
+
 SSH_KEY_FILE_PATH=$(yq e '.sshKeyFile' "$CLUSTER_YAML" || { echo "❌ Failed to read sshKeyFile path from $CLUSTER_YAML"; exit 1; })
 if [[ ! -f "$SSH_KEY_FILE_PATH" ]]; then echo "❌ SSH key file not found: $SSH_KEY_FILE_PATH"; exit 1; fi
 SSH_KEY=$(<"$SSH_KEY_FILE_PATH")
@@ -49,20 +57,15 @@ if [[ ! -f "$VCENTER_CA_CERT_FILE_PATH" ]]; then
   echo "   Please ensure the path in your cluster YAML is correct and the file exists."
   exit 1
 fi
-# --- FIX: Read certificate content, normalize line endings and ensure consistent 4-space indentation using AWK.
-# This AWK command will process the lines on the fly as they are substituted.
-VCENTER_CA_CERT_AWK_CMD='awk "{printf \"    %s\\n\", \$0}"' # Command to add 4 spaces and a newline
+# No need for VCENTER_CA_CERT variable assignment here.
+# The processing will happen directly in the cat <<EOF block.
 
 # Debugging: Print a few critical variables
 echo "DEBUG: BASE_DOMAIN=$BASE_DOMAIN"
 echo "DEBUG: VCENTER_SERVER=$VCENTER_SERVER"
 echo "DEBUG: PULL_SECRET_LENGTH=${#PULL_SECRET} bytes"
 echo "DEBUG: SSH_KEY_LENGTH=${#SSH_KEY} bytes"
-# Test the awk processing here for debugging
-VCENTER_CA_CERT_PROCESSED_DEBUG=$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | eval "$VCENTER_CA_CERT_AWK_CMD" | head -n 5)
-echo "DEBUG: Processed cert content (first 5 lines, AWK processed for final output):"
-echo "$VCENTER_CA_CERT_PROCESSED_DEBUG"
-# The actual substitution will happen in the cat block below.
+# No VCENTER_CA_CERT_LENGTH debug here as it's not stored in a simple variable now.
 
 # Full paths required for OpenShift installer
 CLUSTER_PATH="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER"
@@ -79,7 +82,7 @@ platform:
     vcenters:
     - server: $VCENTER_SERVER
       user: $VCENTER_USERNAME
-      password: PLACEHOLDER_PASSWORD
+      password: $GOVC_PASSWORD
       datacenters:
       - Lab
     failureDomains:
@@ -94,7 +97,7 @@ platform:
         networks:
         - "$VCENTER_NETWORK"
   additionalTrustBundle: |
-$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | eval "$VCENTER_CA_CERT_AWK_CMD") # Process cert directly here
+$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | awk '{printf "    %s\n", $0}') # <-- This is the definitive fix
 pullSecret: |
   $PULL_SECRET
 sshKey: |
@@ -116,7 +119,7 @@ networking:
   - 172.30.0.0/16
 ignition:
   version: 3.2.0
-  url: http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${CLUSTER_NAME}/bootstrap.ign
+  url: http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/bootstrap.ign
 EOF
 
 # Add a check for file size after creation
@@ -130,4 +133,4 @@ else
 fi
 
 echo "✅ Generated install-config.yaml at: $INSTALL_DIR/install-config.yaml"
-echo "⚠️  Remember to inject vSphere credentials into manifests later (via generate-vsphere-creds-manifest.sh)."
+echo "⚠️  Remember to inject vSphere credentials into manifests later (via generate-vsphere-creds-manifests.sh)."

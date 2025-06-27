@@ -13,11 +13,9 @@ CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 INSTALL_DIR="install-configs/${CLUSTER_NAME}"
 
 # Generate manifests
-echo "🛠 Generating OpenShift manifests..."
 openshift-install create manifests --dir="${INSTALL_DIR}"
 
 # Create ignition configs
-echo "📦 Creating ignition configs..."
 openshift-install create ignition-configs --dir="${INSTALL_DIR}"
 
 echo "✅ Cluster configuration complete"

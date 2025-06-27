@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CLUSTER_YAML="$1"
-INSTALL_DIR="$2" # Capture the second argument as INSTALL_DIR
+INSTALL_DIR="$2" # Capture INSTALL_DIR as the second argument
 
 if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
@@ -24,40 +24,35 @@ source "${SCRIPTS_DIR}/load-vcenter-env.sh" "$CLUSTER_YAML"
 : "${VCENTER_DATASTORE:=${GOVC_DATASTORE}}"
 : "${VCENTER_CLUSTER:=${GOVC_CLUSTER}}"
 : "${VCENTER_DATACENTER:=${GOVC_DATACENTER}}"
-# Use GOVC_FOLDER as the base for VM folder path
 : "${GOVC_FOLDER:=/}" # Default to root if not set in govc.env, though it should be set.
 
 # Define the VM folder name based on clusterName from YAML
-CLUSTER_NAME="$(yq eval '.clusterName' "$CLUSTER_YAML")"
+CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}" # e.g., ocp416
 
 # Construct the full path for the cluster's VM folder based on GOVC_FOLDER
-# Example: /Lab/vm/OpenShift/ocp416
 FULL_VCENTER_VM_FOLDER_PATH="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
 
 # Read the remote path for the RHCOS Live ISO from cluster YAML
-# This should be the path *relative to the datastore root* (e.g., 'iso/mycluster-rhcos-live.iso')
-RHCOS_LIVE_ISO_RELATIVE_PATH="$(yq eval '.rhcos_live_iso_path' "$CLUSTER_YAML")"
-# Construct the full remote path to the RHCOS live ISO in the datastore,
-# in the format govc expects for files *within* a datastore.
-# Example: '[datastore-SAN1] iso/ocp416-rhcos-live.iso'
+RHCOS_LIVE_ISO_RELATIVE_PATH="$(yq '.rhcos_live_iso_path' "$CLUSTER_YAML")"
 RHCOS_REMOTE_ISO="[${VCENTER_DATASTORE}] ${RHCOS_LIVE_ISO_RELATIVE_PATH}"
+
+# Read Ignition Server details directly within deploy-vms.sh
+IGNITION_SERVER_IP=$(yq '.ignition_server.host_ip' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.host_ip from $CLUSTER_YAML"; exit 1; })
+IGNITION_SERVER_PORT=$(yq '.ignition_server.port' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.port from $CLUSTER_YAML"; exit 1; })
 
 # Ensure VM folder exists
 echo "🔍 Checking for VM folder: ${FULL_VCENTER_VM_FOLDER_PATH}..."
-# govc folder.info expects an absolute path
 if ! govc folder.info "${FULL_VCENTER_VM_FOLDER_PATH}" &>/dev/null; then
   echo "📁 VM folder does not exist, creating: ${FULL_VCENTER_VM_FOLDER_PATH}"
-  # govc folder.create expects an absolute path or path relative to current context
-  # Providing full path ensures it's created correctly under the specified GOVC_FOLDER base.
   govc folder.create "${FULL_VCENTER_VM_FOLDER_PATH}"
 else
   echo "✅ VM folder exists: ${FULL_VCENTER_VM_FOLDER_PATH}"
 fi
 
-# --- NEW: Dynamically build NODES array from cluster YAML ---
-MASTER_REPLICAS=$(yq eval '.node_counts.master' "$CLUSTER_YAML")
-WORKER_REPLICAS=$(yq eval '.node_counts.worker' "$CLUSTER_YAML")
+# Dynamically build NODES array from cluster YAML
+MASTER_REPLICAS=$(yq '.node_counts.master' "$CLUSTER_YAML")
+WORKER_REPLICAS=$(yq '.node_counts.worker' "$CLUSTER_YAML")
 
 NODES=("bootstrap") # Bootstrap node is always present
 
@@ -70,23 +65,25 @@ for i in $(seq 0 $((WORKER_REPLICAS - 1))); do
 done
 
 echo "VMs to deploy: ${NODES[@]}"
-# --- END NEW NODE BUILD ---
 
 echo "⏱ $(date '+%Y-%m-%d %H:%M:%S') - 🚀 Deploying VMs..."
 
 for node in "${NODES[@]}"; do
   vm_name="${CLUSTER_NAME}-$node"
 
-  # Determine the correct ignition file path based on node type
+  # Determine the correct ignition file path (local on host) based on node type
   case "$node" in
     "bootstrap")
-      ignition_file="$INSTALL_DIR/bootstrap.ign"
+      ignition_file_local="$INSTALL_DIR/bootstrap.ign"
+      ignition_url_path_segment="bootstrap.ign" # Will be at root of webserver
       ;;
-    "master-"*) # Matches master-0, master-1, etc.
-      ignition_file="$INSTALL_DIR/master.ign" # All master nodes use the same master.ign
+    "master-"*)
+      ignition_file_local="$INSTALL_DIR/master.ign"
+      ignition_url_path_segment="master.ign"      # Will be at root of webserver
       ;;
-    "worker-"*) # Matches worker-0, worker-1, etc.
-      ignition_file="$INSTALL_DIR/worker.ign" # All worker nodes use the same worker.ign
+    "worker-"*)
+      ignition_file_local="$INSTALL_DIR/worker.ign"
+      ignition_url_path_segment="worker.ign"      # Will be at root of webserver
       ;;
     *)
       echo "❌ Unknown node type: $node. Cannot determine ignition file."
@@ -102,27 +99,24 @@ for node in "${NODES[@]}"; do
 
   case "$node" in
     "bootstrap")
-      CPU=$(yq eval '.vm_sizing.bootstrap.cpu' "$CLUSTER_YAML")
-      MEMORY_GB=$(yq eval '.vm_sizing.bootstrap.memory_gb' "$CLUSTER_YAML")
-      DISK_GB=$(yq eval '.vm_sizing.bootstrap.disk_gb' "$CLUSTER_YAML")
-      VM_MAC=$(yq eval ".node_macs.bootstrap" "$CLUSTER_YAML" || true)
+      CPU=$(yq '.vm_sizing.bootstrap.cpu' "$CLUSTER_YAML")
+      MEMORY_GB=$(yq '.vm_sizing.bootstrap.memory_gb' "$CLUSTER_YAML")
+      DISK_GB=$(yq '.vm_sizing.bootstrap.disk_gb' "$CLUSTER_YAML")
+      VM_MAC=$(yq ".node_macs.bootstrap" "$CLUSTER_YAML" || true)
       ;;
-    "master-"*) # Matches master-0, master-1, etc.
-      CPU=$(yq eval '.vm_sizing.master.cpu' "$CLUSTER_YAML")
-      MEMORY_GB=$(yq eval '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
-      DISK_GB=$(yq eval '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
-      # Dynamically pull MAC for specific master (e.g., node_macs.master-0)
-      VM_MAC=$(yq eval ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
+    "master-"*)
+      CPU=$(yq '.vm_sizing.master.cpu' "$CLUSTER_YAML")
+      MEMORY_GB=$(yq '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
+      DISK_GB=$(yq '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
+      VM_MAC=$(yq ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
       ;;
-    "worker-"*) # Matches worker-0, worker-1, etc.
-      CPU=$(yq eval '.vm_sizing.worker.cpu' "$CLUSTER_YAML")
-      MEMORY_GB=$(yq eval('.vm_sizing.worker.memory_gb') "$CLUSTER_YAML")
-      DISK_GB=$(yq eval('.vm_sizing.worker.disk_gb') "$CLUSTER_YAML")
-      # Dynamically pull MAC for specific worker (e.g., node_macs.worker-0)
-      VM_MAC=$(yq eval ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
+    "worker-"*)
+      CPU=$(yq '.vm_sizing.worker.cpu' "$CLUSTER_YAML")
+      MEMORY_GB=$(yq '.vm_sizing.worker.memory_gb' "$CLUSTER_YAML")
+      DISK_GB=$(yq '.vm_sizing.worker.disk_gb' "$CLUSTER_YAML")
+      VM_MAC=$(yq ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
       ;;
     *)
-      # Fallback or error if an unhandled node type somehow reaches here (shouldn't with above NODES array)
       echo "❌ Error: Sizing/MAC not defined for node type: $node"
       exit 1
       ;;
@@ -138,46 +132,65 @@ for node in "${NODES[@]}"; do
   # Safely destroy VM if it exists, using the full VM path
   govc vm.destroy -vm.ipath="${FULL_VCENTER_VM_FOLDER_PATH}/${vm_name}" 2>/dev/null || true
 
-  # Build govc vm.create command
-  GOVC_CREATE_CMD=(
-    govc vm.create
-    -on=false # Create powered off to ensure MAC assignment can happen cleanly
+  # Build govc vm.create command options
+  GOVC_CREATE_OPTIONS=(
+    -on=false # Create powered off
     -c="${CPU}" -m=$((MEMORY_GB * 1024))
     -g=rhel8_64Guest
-    -net="$VCENTER_NETWORK" # Specify network name ONLY
+    -net="$VCENTER_NETWORK" # Specify network name
     -disk.controller=lsilogic
     -disk="${DISK_GB}000"
     -iso="${RHCOS_REMOTE_ISO}"
     -pool="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER/Resources"
     -ds="$VCENTER_DATASTORE"
     -folder="${FULL_VCENTER_VM_FOLDER_PATH}"
-    "$vm_name" # Append VM name last
   )
 
-  # Execute the govc vm.create command
-  "${GOVC_CREATE_CMD[@]}"
-
-  # --- STEPS FOR MAC ASSIGNMENT ---
-  # If VM_MAC is specified, the VM must be powered off to change the MAC address.
-  # We created with -on=false, so the VM is already in the correct state for vm.change.
+  # Conditionally add -net.address flag here, before the VM name
   if [[ -n "$VM_MAC" ]]; then
-    echo "⚙️ Setting specific MAC address for $vm_name to $VM_MAC..."
-    # Change the MAC address of the first network adapter (ethernet0)
-    if ! govc vm.change -vm "$vm_name" -e "ethernet0.macAddress=${VM_MAC}"; then
-      echo "❌ Failed to set MAC address for $vm_name. Please check govc permissions or VM state."
+    GOVC_CREATE_OPTIONS+=("-net.address")
+    GOVC_CREATE_OPTIONS+=("${VM_MAC}")
+  fi
+
+  # --- FIX: Temporarily disable set -e to allow govc vm.create to run, then verify MAC ---
+  set +e # Disable exit on error for this block
+  echo "DEBUG: Executing govc vm.create command (expecting possible error message but successful creation):"
+  govc vm.create "${GOVC_CREATE_OPTIONS[@]}" "$vm_name"
+  CREATE_STATUS=$? # Capture the exit status of govc vm.create
+  set -e # Re-enable exit on error
+
+  if [[ "$CREATE_STATUS" -ne 0 ]]; then
+      echo "❌ WARNING: govc vm.create returned non-zero exit code $CREATE_STATUS. Proceeding to verify MAC."
+      # This is the expected "error" when -net.address is used but still created.
+  fi
+
+  # --- FIX: Verify MAC address immediately after creation ---
+  if [[ -n "$VM_MAC" ]]; then
+    echo "⚙️ Verifying MAC address for $vm_name post-creation..."
+    # Give vCenter a brief moment to commit the changes if needed
+    sleep 2
+    ACTUAL_MAC=$(govc vm.info "$vm_name" -json | jq -r '.Config.Hardware.Device[] | select(.MacAddress != null and .Backing.DeviceName == "'"$VCENTER_NETWORK"'").MacAddress')
+    if [[ "$ACTUAL_MAC" != "$VM_MAC" ]]; then
+      echo "❌ ERROR: Assigned MAC ($VM_MAC) does NOT match actual VM MAC ($ACTUAL_MAC) after creation for $vm_name!"
+      echo "   This implies govc vm.create -net.address failed to assign the MAC despite successful VM creation."
       exit 1
     fi
-    echo "✅ MAC address set to $VM_MAC for $vm_name."
+    echo "✅ MAC address verified: $ACTUAL_MAC for $vm_name."
   fi
-  # --- END MAC ASSIGNMENT STEPS ---
+  # --- END FIX ---
 
-  # No guestinfo injection here; VMs will fetch via HTTP
+  # --- Inject ignition.url as a kernel argument using vm.change ---
+  IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}"
+  echo "⚙️ Injecting Ignition URL as kernel argument for $vm_name: $IGNITION_URL"
+  if ! govc vm.change "$vm_name" -e "guestinfo.kernel.args=ignition.url=$IGNITION_URL"; then
+    echo "❌ Failed to set ignition.url kernel argument for $vm_name. Check govc permissions or VM state."
+    exit 1
+  fi
+  echo "✅ Ignition URL kernel argument set."
 
   echo "Powering on: $vm_name"
   govc vm.power -on=true "$vm_name"
-  echo "VM $vm_name powered on and will fetch Ignition config from http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${CLUSTER_NAME}/${node}.ign"
-  # Note: The 'bootstrap.ign', 'master.ign', and 'worker.ign' files will be served by HTTP server.
-  # The 'node.ign' placeholder here is a general indicator of the expected fetch path.
+  echo "VM $vm_name powered on and will fetch Ignition config from $IGNITION_URL"
 done
 
 echo "✅ VM deployment complete!"

@@ -9,7 +9,7 @@ vcenter_datacenter: Lab
 vcenter_cluster: "Lab Cluster" 
 vcenter_datastore: datastore-SAN1 
 vcenter_network: OpenShift_192.168.42.0
-vcenter_ca_cert_file: assets/vcenter-ca.crt
+vcenter_ca_cert_file: assets/vcenter1.sboyle.internal.cer
 
 sshKeyFile: assets/ssh-key.pub # Path to your SSH public key
 pullSecretFile: assets/pull-secret.json # Path to your pull secret JSON
@@ -69,4 +69,4 @@ node_macs:
 
 ignition_server:
   host_ip: 192.168.11.192 # The IP address of the machine running your deployment scripts (the HTTP server)
-  port: 8080 # Port for the HTTP server
+  port: 8000 # Port for the HTTP server

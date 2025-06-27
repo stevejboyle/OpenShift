@@ -13,7 +13,8 @@ assets/pull-secret.json
 assets/console-password.txt
 assets/core-user-password.txt
 .vcenterpw
-assets/*.crt
+assets/*.pem
+assets/*.cer
 
 # SSH Keys (keep public keys, ignore private)
 assets/*id_rsa
