@@ -15,8 +15,7 @@ sshKeyFile: assets/ssh-key.pub # Path to your SSH public key
 pullSecretFile: assets/pull-secret.json # Path to your pull secret JSON
 consolePasswordFile: assets/console-password.txt # Path to your htpasswd hash file
 
-rhcos_iso: rhcos-4.16.36-x86_64-live.x86_64.iso # Only the filename, assumes it's in assets/
-rhcos_live_iso_path: iso/rhcos/rhcos-4.16.36-x86_64-live.x86_64.iso # Remote path in vCenter datastore for live ISO
+rhcos_vm_template: /Lab/RHCOS-4.16-Template
 
 node_counts:
   master: 3

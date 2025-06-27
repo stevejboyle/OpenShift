@@ -33,9 +33,14 @@ VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}" # e.g., ocp416
 # Construct the full path for the cluster's VM folder based on GOVC_FOLDER
 FULL_VCENTER_VM_FOLDER_PATH="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
 
-# Read the remote path for the RHCOS Live ISO from cluster YAML
-RHCOS_LIVE_ISO_RELATIVE_PATH="$(yq '.rhcos_live_iso_path' "$CLUSTER_YAML")"
-RHCOS_REMOTE_ISO="[${VCENTER_DATASTORE}] ${RHCOS_LIVE_ISO_RELATIVE_PATH}"
+# --- REMOVED: RHCOS ISO related variables as we are using OVA template ---
+# RHCOS_LIVE_ISO_RELATIVE_PATH="$(yq '.rhcos_live_iso_path' "$CLUSTER_YAML")"
+# RHCOS_REMOTE_ISO="[${VCENTER_DATASTORE}] ${RHCOS_LIVE_ISO_RELATIVE_PATH}"
+# --- END REMOVED ---
+
+# --- NEW: Read RHCOS VM Template path from cluster YAML ---
+RHCOS_VM_TEMPLATE_PATH=$(yq '.rhcos_vm_template' "$CLUSTER_YAML" || { echo "❌ Failed to read rhcos_vm_template from $CLUSTER_YAML"; exit 1; })
+# --- END NEW ---
 
 # Read Ignition Server details directly within deploy-vms.sh
 IGNITION_SERVER_IP=$(yq '.ignition_server.host_ip' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.host_ip from $CLUSTER_YAML"; exit 1; })
@@ -140,7 +145,10 @@ for node in "${NODES[@]}"; do
     -net="$VCENTER_NETWORK" # Specify network name
     -disk.controller=lsilogic
     -disk="${DISK_GB}000"
-    -iso="${RHCOS_REMOTE_ISO}"
+    # --- FIX: Deploy from VM template instead of ISO ---
+    -vm-template="$RHCOS_VM_TEMPLATE_PATH" # Use the path to the RHCOS OVA template
+    # REMOVED: -iso="${RHCOS_REMOTE_ISO}"
+    # --- END FIX ---
     -pool="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER/Resources"
     -ds="$VCENTER_DATASTORE"
     -folder="${FULL_VCENTER_VM_FOLDER_PATH}"
@@ -152,8 +160,6 @@ for node in "${NODES[@]}"; do
     GOVC_CREATE_OPTIONS+=("${VM_MAC}")
   fi
 
-  # --- FIX: Temporarily disable set -e to allow govc vm.create to run, then verify creation.
-  # Removed MAC verification block as per user's request, assuming it works.
   set +e # Disable exit on error for this block
   echo "DEBUG: Executing govc vm.create command and capturing output:"
   FULL_GOVC_CREATE_OUTPUT=$(govc vm.create "${GOVC_CREATE_OPTIONS[@]}" "$vm_name" 2>&1)
@@ -169,17 +175,72 @@ for node in "${NODES[@]}"; do
       echo "✅ govc vm.create completed successfully. Output:"
       echo "$FULL_GOVC_CREATE_OUTPUT" # Print govc's actual output to logs
   fi
+
+  # --- Verify MAC address immediately after creation using robust JSON parsing ---
+  echo "⚙️ Verifying MAC address for $vm_name post-creation..."
+  sleep 5 # Decreased sleep back to 5 seconds.
+
+  # Fetch VM info using JSON output, retry until valid JSON is received
+  RETRIES=10 # Increased retries
+  VM_INFO_JSON=""
+  for (( i=1; i<=RETRIES; i++ )); do
+      echo "DEBUG: Attempting govc vm.info -json (attempt $i/$RETRIES)..."
+      VM_INFO_RAW=$(govc vm.info -json "$vm_name" 2>/dev/null) # Get raw JSON output, redirect stderr to null
+      echo "DEBUG: Raw govc vm.info -json output (attempt $i):"
+      echo "$VM_INFO_RAW" # Print raw output for debugging
+
+      # Check if it's valid JSON. If so, assign and break loop.
+      if echo "$VM_INFO_RAW" | jq . >/dev/null 2>&1; then 
+          VM_INFO_JSON="$VM_INFO_RAW"
+          echo "DEBUG: govc vm.info returned valid JSON."
+          break
+      else
+          echo "DEBUG: govc vm.info did not return valid JSON. Retrying in 3 seconds..."
+          sleep 3
+      fi
+  done
+
+  if [[ -z "$VM_INFO_JSON" ]]; then
+      echo "❌ ERROR: Failed to get valid VM info JSON after multiple retries for $vm_name."
+      echo "   Last raw output from govc vm.info was: '$VM_INFO_RAW'"
+      exit 1
+  fi
+
+  # Extract actual MAC from JSON output using jq - refined filter for DVSwitch
+  PORTGROUP_KEY=$(echo "$VM_INFO_JSON" | jq -r '.network[] | select(.name == "'"$VCENTER_NETWORK"'").value')
+
+  if [[ -z "$PORTGROUP_KEY" ]]; then
+      echo "❌ ERROR: Could not find portgroupKey for network '$VCENTER_NETWORK' in VM info JSON for $vm_name."
+      exit 1
+  fi
+
+  ACTUAL_MAC=$(echo "$VM_INFO_JSON" | jq -r '.config.hardware.device[] | select(.backing.port.portgroupKey? == "'"$PORTGROUP_KEY"'").macAddress // empty')
+  
+  if [[ -z "$ACTUAL_MAC" ]]; then
+      echo "❌ ERROR: Could not find a network adapter with a valid MAC on portgroup '$PORTGROUP_KEY' for $vm_name in VM info JSON."
+      exit 1
+  fi
+
+  if [[ -n "$VM_MAC" ]]; then # Only check against desired MAC if it was specified
+    if [[ "$ACTUAL_MAC" != "$VM_MAC" ]]; then
+      echo "❌ ERROR: Assigned MAC ($VM_MAC) does NOT match actual VM MAC ($ACTUAL_MAC) after creation for $vm_name!"
+      echo "   This implies govc vm.create -net.address failed to assign the MAC despite successful VM creation."
+      exit 1
+    fi
+  else # If MAC was not specified, verify it's not empty (i.e. auto-assigned MAC exists)
+      if [[ -z "$ACTUAL_MAC" ]]; then
+          echo "❌ ERROR: VM was expected to get an auto-assigned MAC address, but none was found for $vm_name."
+          exit 1
+      }
+  fi
+  echo "✅ MAC address verified: $ACTUAL_MAC for $vm_name."
   # --- END FIX ---
 
-  # --- REMOVED: MAC Address Verification Block ---
-  # This block was removed as per user's request, assuming MAC assignment works.
-  # --- END REMOVED ---
-
   # --- Inject ignition.url as a kernel argument using vm.change ---
-  IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}" #
-  KERNEL_ARGS="ignition.url=$IGNITION_URL rd.neednet=1 ip=dhcp coreos.platform=vsphere console=ttyS0,115200 ignition.debug" # Final set of kernel args
+  IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}"
+  KERNEL_ARGS="ignition.url=$IGNITION_URL rd.neednet=1 ip=dhcp console=ttyS0,115200 ignition.debug coreos.platform=vsphere"
   echo "⚙️ Injecting Ignition URL as kernel argument for $vm_name: $KERNEL_ARGS"
-  if ! govc vm.change -vm "$vm_name" -e "guestinfo.kernel.args=$KERNEL_ARGS"; then #
+  if ! govc vm.change -vm "$vm_name" -e "guestinfo.kernel.args=$KERNEL_ARGS"; then
     echo "❌ Failed to set ignition.url kernel argument for $vm_name. Check govc permissions or VM state."
     exit 1
   fi

@@ -16,14 +16,13 @@ echo "✅ Successfully loaded and validated vSphere credentials"
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
 DATASTORE="${GOVC_DATASTORE}"
 # Construct the full path for the cluster's VM folder based on GOVC_FOLDER
-# Example: /Lab/vm/OpenShift/ocp416
 VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}"
 VMF="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
 
 ISO_FOLDER="[${DATASTORE}] iso/${CLUSTER_NAME}"
 MANIFEST_DIR="./install-configs/${CLUSTER_NAME}"
 
-# --- NEW: Dynamically build VMS array from cluster YAML ---
+# --- Dynamically build VMS array from cluster YAML (already implemented) ---
 MASTER_REPLICAS=$(yq eval '.node_counts.master' "$CLUSTER_YAML")
 WORKER_REPLICAS=$(yq eval '.node_counts.worker' "$CLUSTER_YAML")
 
@@ -38,7 +37,7 @@ for i in $(seq 0 $((WORKER_REPLICAS - 1))); do
 done
 
 echo "🛑 Shutting down and deleting VMs: ${VMS[@]} (if exist)..."
-# --- END NEW NODE BUILD ---
+# --- END DYNAMIC NODE BUILD ---
 
 for vm in "${VMS[@]}"; do
   if govc vm.info "$vm" &>/dev/null; then
