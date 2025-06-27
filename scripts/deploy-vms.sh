@@ -152,37 +152,34 @@ for node in "${NODES[@]}"; do
     GOVC_CREATE_OPTIONS+=("${VM_MAC}")
   fi
 
-  # --- FIX: Temporarily disable set -e to allow govc vm.create to run, then verify MAC ---
+  # --- FIX: Temporarily disable set -e to allow govc vm.create to run, then verify creation.
+  # Removed MAC verification block as per user's request, assuming it works.
   set +e # Disable exit on error for this block
-  echo "DEBUG: Executing govc vm.create command (expecting possible error message but successful creation):"
-  govc vm.create "${GOVC_CREATE_OPTIONS[@]}" "$vm_name"
+  echo "DEBUG: Executing govc vm.create command and capturing output:"
+  FULL_GOVC_CREATE_OUTPUT=$(govc vm.create "${GOVC_CREATE_OPTIONS[@]}" "$vm_name" 2>&1)
   CREATE_STATUS=$? # Capture the exit status of govc vm.create
   set -e # Re-enable exit on error
 
   if [[ "$CREATE_STATUS" -ne 0 ]]; then
-      echo "❌ WARNING: govc vm.create returned non-zero exit code $CREATE_STATUS. Proceeding to verify MAC."
-      # This is the expected "error" when -net.address is used but still created.
-  fi
-
-  # --- FIX: Verify MAC address immediately after creation ---
-  if [[ -n "$VM_MAC" ]]; then
-    echo "⚙️ Verifying MAC address for $vm_name post-creation..."
-    # Give vCenter a brief moment to commit the changes if needed
-    sleep 2
-    ACTUAL_MAC=$(govc vm.info "$vm_name" -json | jq -r '.Config.Hardware.Device[] | select(.MacAddress != null and .Backing.DeviceName == "'"$VCENTER_NETWORK"'").MacAddress')
-    if [[ "$ACTUAL_MAC" != "$VM_MAC" ]]; then
-      echo "❌ ERROR: Assigned MAC ($VM_MAC) does NOT match actual VM MAC ($ACTUAL_MAC) after creation for $vm_name!"
-      echo "   This implies govc vm.create -net.address failed to assign the MAC despite successful VM creation."
-      exit 1
-    fi
-    echo "✅ MAC address verified: $ACTUAL_MAC for $vm_name."
+      echo "❌ FATAL ERROR: govc vm.create returned non-zero exit code $CREATE_STATUS."
+      echo "Full govc vm.create output:"
+      echo "$FULL_GOVC_CREATE_OUTPUT"
+      exit 1 # Exit script because VM creation is essential.
+  else
+      echo "✅ govc vm.create completed successfully. Output:"
+      echo "$FULL_GOVC_CREATE_OUTPUT" # Print govc's actual output to logs
   fi
   # --- END FIX ---
 
+  # --- REMOVED: MAC Address Verification Block ---
+  # This block was removed as per user's request, assuming MAC assignment works.
+  # --- END REMOVED ---
+
   # --- Inject ignition.url as a kernel argument using vm.change ---
-  IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}"
-  echo "⚙️ Injecting Ignition URL as kernel argument for $vm_name: $IGNITION_URL"
-  if ! govc vm.change "$vm_name" -e "guestinfo.kernel.args=ignition.url=$IGNITION_URL"; then
+  IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}" #
+  KERNEL_ARGS="ignition.url=$IGNITION_URL rd.neednet=1 ip=dhcp coreos.platform=vsphere console=ttyS0,115200 ignition.debug" # Final set of kernel args
+  echo "⚙️ Injecting Ignition URL as kernel argument for $vm_name: $KERNEL_ARGS"
+  if ! govc vm.change -vm "$vm_name" -e "guestinfo.kernel.args=$KERNEL_ARGS"; then #
     echo "❌ Failed to set ignition.url kernel argument for $vm_name. Check govc permissions or VM state."
     exit 1
   fi
