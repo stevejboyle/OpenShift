@@ -23,11 +23,7 @@ log_step() {
 
 # Define INSTALL_DIR here so it's available for subsequent scripts
 INSTALL_DIR="install-configs/$(yq eval '.clusterName' "$CLUSTER_YAML")"
-CLUSTER_NAME="$(yq eval '.clusterName' "$CLUSTER_YAML")" # Get cluster name for HTTP server path
-
-# Get Ignition Server details from YAML for starting the server (still needed here)
-IGNITION_SERVER_IP=$(yq e '.ignition_server.host_ip' "$CLUSTER_YAML")
-IGNITION_SERVER_PORT=$(yq e '.ignition_server.port' "$CLUSTER_YAML")
+CLUSTER_NAME="$(yq eval '.clusterName' "$CLUSTER_YAML")" # Get cluster name
 
 # 1. Validate vSphere credentials once at the very beginning
 log_step "1️⃣ Validating vSphere credentials and resources..."
@@ -48,28 +44,19 @@ log_step "5️⃣ Injecting vSphere credentials into manifests..."
 log_step "6️⃣ Generating static IP manifests (if configured)..."
 "${SCRIPTS}/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
 
-log_step "7️⃣ Creating config-drive ISO images (these are NOT used for Ignition, only if needed for debug/backup)..."
-"${SCRIPTS}/create-config-cdroms.sh" "$CLUSTER_YAML"
+# REMOVED: HTTP server start and trap (no longer needed as Ignition is injected via guestinfo.config.data)
 
+log_step "7️⃣ Deploying VMs..." # Re-numbered step
+"${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
 
-log_step "8️⃣ Starting HTTP server for Ignition delivery (serving from ${INSTALL_DIR})..."
-(cd "${INSTALL_DIR}" && python3 -m http.server "$IGNITION_SERVER_PORT" &)
-HTTP_SERVER_PID=$!
-echo "✅ HTTP server started on http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT} with PID: $HTTP_SERVER_PID"
-echo "   Serving Ignition files from: ${INSTALL_DIR}"
-trap "kill $HTTP_SERVER_PID || true; echo 'HTTP server (PID $HTTP_SERVER_PID) stopped.'" EXIT
-
-log_step "9️⃣ Deploying VMs..."
-"${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML" "$INSTALL_DIR" # Removed IGNITION_SERVER_IP and PORT arguments here
-
-log_step "🔟 Monitoring bootstrap progress (this may take 15-30 minutes)..."
+log_step "8️⃣ Monitoring bootstrap progress (this may take 15-30 minutes)..." # Re-numbered step
 if ! "${SCRIPTS}/monitor-bootstrap.sh" "$CLUSTER_YAML"; then
   echo "❌ Bootstrap failed or timed out. Check logs: $LOGFILE"
   exit 1
 fi
 echo "✅ Bootstrap complete!"
 
-log_step "1️⃣1️⃣ Fixing cloud provider taints..."
+log_step "9️⃣ Fixing cloud provider taints..." # Re-numbered step
 if ! "${SCRIPTS}/fix-cloud-provider-taints.sh" "$INSTALL_DIR"; then
   echo "⚠️ Failed to remove cloud provider taints. This may indicate an issue with cloud-controller-manager."
 fi

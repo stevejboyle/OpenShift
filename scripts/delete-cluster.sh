@@ -19,7 +19,6 @@ DATASTORE="${GOVC_DATASTORE}"
 VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}"
 VMF="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
 
-ISO_FOLDER="[${DATASTORE}] iso/${CLUSTER_NAME}"
 MANIFEST_DIR="./install-configs/${CLUSTER_NAME}"
 
 # --- Dynamically build VMS array from cluster YAML (already implemented) ---
@@ -55,14 +54,6 @@ done
 # Delete VM folder (if exists)
 echo "🧼 Removing folder $VMF (if exists)..."
 govc object.destroy "$VMF" || echo "⚠️ Folder not found or already removed: $VMF"
-
-# Delete ISOs from datastore (if exists)
-echo "🗑 Deleting ISOs from $ISO_FOLDER..."
-if govc datastore.ls "$ISO_FOLDER" &>/dev/null; then
-  govc datastore.rm -f "$ISO_FOLDER" || echo "⚠️ Could not remove ISO directory"
-else
-  echo "ℹ️ ISO directory not found"
-fi
 
 # Delete manifests and install configs locally
 echo "🗑 Deleting manifests and install-configs for $CLUSTER_NAME..."

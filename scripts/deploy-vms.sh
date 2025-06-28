@@ -33,16 +33,11 @@ VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}" # e.g., ocp416
 # Construct the full path for the cluster's VM folder based on GOVC_FOLDER
 FULL_VCENTER_VM_FOLDER_PATH="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
 
-# --- REMOVED: RHCOS ISO related variables as we are using OVA template ---
-# RHCOS_LIVE_ISO_RELATIVE_PATH="$(yq '.rhcos_live_iso_path' "$CLUSTER_YAML")"
-# RHCOS_REMOTE_ISO="[${VCENTER_DATASTORE}] ${RHCOS_LIVE_ISO_RELATIVE_PATH}"
-# --- END REMOVED ---
-
 # --- NEW: Read RHCOS VM Template path from cluster YAML ---
 RHCOS_VM_TEMPLATE_PATH=$(yq '.rhcos_vm_template' "$CLUSTER_YAML" || { echo "❌ Failed to read rhcos_vm_template from $CLUSTER_YAML"; exit 1; })
 # --- END NEW ---
 
-# Read Ignition Server details directly within deploy-vms.sh
+# Read Ignition Server details (used for logging only now, not for actual fetching URL)
 IGNITION_SERVER_IP=$(yq '.ignition_server.host_ip' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.host_ip from $CLUSTER_YAML"; exit 1; })
 IGNITION_SERVER_PORT=$(yq '.ignition_server.port' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.port from $CLUSTER_YAML"; exit 1; })
 
@@ -79,16 +74,13 @@ for node in "${NODES[@]}"; do
   # Determine the correct ignition file path (local on host) based on node type
   case "$node" in
     "bootstrap")
-      ignition_file_local="$INSTALL_DIR/bootstrap.ign"
-      ignition_url_path_segment="bootstrap.ign" # Will be at root of webserver
+      ignition_file_local="$INSTALL_DIR/bootstrap.ign" # Local file to base64 encode
       ;;
     "master-"*)
-      ignition_file_local="$INSTALL_DIR/master.ign"
-      ignition_url_path_segment="master.ign"      # Will be at root of webserver
+      ignition_file_local="$INSTALL_DIR/master.ign"   # Local file to base64 encode
       ;;
     "worker-"*)
-      ignition_file_local="$INSTALL_DIR/worker.ign"
-      ignition_url_path_segment="worker.ign"      # Will be at root of webserver
+      ignition_file_local="$INSTALL_DIR/worker.ign"   # Local file to base64 encode
       ;;
     *)
       echo "❌ Unknown node type: $node. Cannot determine ignition file."
@@ -137,18 +129,18 @@ for node in "${NODES[@]}"; do
   # Safely destroy VM if it exists, using the full path
   govc vm.destroy -vm.ipath="${FULL_VCENTER_VM_FOLDER_PATH}/${vm_name}" 2>/dev/null || true
 
-
   # --- FIX: Use govc vm.clone instead of vm.create ---
   GOVC_CLONE_OPTIONS=(
     -vm="$RHCOS_VM_TEMPLATE_PATH" # Source template VM
-    -cluster="$VCENTER_CLUSTER"
-    -net="$VCENTER_NETWORK"
+    -net="$VCENTER_NETWORK" # Network for the cloned VM
     -ds="$VCENTER_DATASTORE"
+    -cluster="$VCENTER_CLUSTER"
     -folder="${FULL_VCENTER_VM_FOLDER_PATH}"
     -on=false # Clone, but keep powered off
-    -c="${CPU}" -m=$((MEMORY_GB * 1024)) # Apply CPU/Memory sizing directly during clone
+    -c="${CPU}" -m=$((MEMORY_GB * 1024)) # Apply CPU/Memory sizing
   )
 
+  # Conditionally add -net.mac and -net.mac.type flags for cloning
   if [[ -n "$VM_MAC" ]]; then
     GOVC_CLONE_OPTIONS+=("-net.address=${VM_MAC}")
   fi
@@ -170,23 +162,42 @@ for node in "${NODES[@]}"; do
   fi
   # --- END FIX ---
 
-  # --- Skipping MAC verification after cloning, assume clone handles it ---
   echo "⚙️ Skipping MAC address verification as vm.clone is expected to handle it."
-  # --- END Skip ---
 
-  # --- Inject ignition.url as a kernel argument using vm.change ---
-  IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}"
-  KERNEL_ARGS="ignition.url=$IGNITION_URL rd.neednet=1 ip=dhcp console=ttyS0,115200 ignition.debug coreos.platform=vsphere"
-  echo "⚙️ Injecting Ignition URL as kernel argument for $vm_name: $KERNEL_ARGS"
-  if ! govc vm.change -vm "$vm_name" -e "guestinfo.kernel.args=$KERNEL_ARGS"; then
-    echo "❌ Failed to set ignition.url kernel argument for $vm_name. Check govc permissions or VM state."
+  # --- FIX: Resize Disk After Cloning ---
+  # Assuming the primary disk is 'Hard disk 1' and needs to be resized to DISK_GB
+  echo "⚙️ Resizing disk for $vm_name to ${DISK_GB}GB..."
+  # The disk size is set in GB, govc vm.disk.change expects it in GB
+  if ! govc vm.disk.change -vm "$vm_name" -disk.label="Hard disk 1" -size="${DISK_GB}GB"; then
+    echo "❌ Failed to resize disk for $vm_name. Check govc permissions or VM state."
     exit 1
   fi
-  echo "✅ Ignition URL kernel argument set."
+  echo "✅ Disk resized to ${DISK_GB}GB for $vm_name."
+  sleep 5 # Give vCenter time to commit disk resize
+  # --- END FIX ---
+
+  # --- NEW FIX: Inject Ignition Config Data (Base64) ---
+  # This is the method the user confirmed works for modern RedHat versions.
+  # It bypasses kernel args and web server fetching issues.
+  IGNITION_CONFIG_B64=$(base64 -i "$ignition_file_local" | tr -d '\n')
+  KERNEL_ARGS="console=ttyS0,115200 ignition.debug coreos.platform=vsphere cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1 swapaccount=1 noswap"
+
+
+  echo "⚙️ Injecting Ignition config data (base64) for $vm_name. Size: ${#IGNITION_CONFIG_B64} bytes."
+  if ! govc vm.change -vm "$vm_name" \
+    -e "guestinfo.ignition.config.data=${IGNITION_CONFIG_B64}" \
+    -e "guestinfo.ignition.config.data.encoding=base64" \
+    -e "guestinfo.kernel.args=${KERNEL_ARGS}"; then
+    echo "❌ Failed to set guestinfo.ignition.config.data for $vm_name. Check govc permissions or VM state."
+    # If the error is due to size limit, this will fail.
+    exit 1
+  fi
+  echo "✅ guestinfo.ignition.config.data set."
+  # --- END NEW FIX ---
 
   echo "Powering on: $vm_name"
   govc vm.power -on=true "$vm_name"
-  echo "VM $vm_name powered on and will fetch Ignition config from $IGNITION_URL (deployed from template)."
+  echo "VM $vm_name powered on and will boot with Ignition config from guestinfo."
 done
 
 echo "✅ VM deployment complete!"
