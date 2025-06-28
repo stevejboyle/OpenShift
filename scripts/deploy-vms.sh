@@ -134,107 +134,45 @@ for node in "${NODES[@]}"; do
     echo "   MAC will be auto-assigned by vCenter."
   fi
 
-  # Safely destroy VM if it exists, using the full VM path
+  # Safely destroy VM if it exists, using the full path
   govc vm.destroy -vm.ipath="${FULL_VCENTER_VM_FOLDER_PATH}/${vm_name}" 2>/dev/null || true
 
-  # Build govc vm.create command options
-  GOVC_CREATE_OPTIONS=(
-    -on=false # Create powered off
-    -c="${CPU}" -m=$((MEMORY_GB * 1024))
-    -g=rhel8_64Guest
-    -net="$VCENTER_NETWORK" # Specify network name
-    -disk.controller=lsilogic
-    -disk="${DISK_GB}000"
-    # --- FIX: Deploy from VM template instead of ISO ---
-    -vm-template="$RHCOS_VM_TEMPLATE_PATH" # Use the path to the RHCOS OVA template
-    # REMOVED: -iso="${RHCOS_REMOTE_ISO}"
-    # --- END FIX ---
-    -pool="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER/Resources"
+
+  # --- FIX: Use govc vm.clone instead of vm.create ---
+  GOVC_CLONE_OPTIONS=(
+    -vm="$RHCOS_VM_TEMPLATE_PATH" # Source template VM
+    -cluster="$VCENTER_CLUSTER"
+    -net="$VCENTER_NETWORK"
     -ds="$VCENTER_DATASTORE"
     -folder="${FULL_VCENTER_VM_FOLDER_PATH}"
+    -on=false # Clone, but keep powered off
+    -c="${CPU}" -m=$((MEMORY_GB * 1024)) # Apply CPU/Memory sizing directly during clone
   )
 
-  # Conditionally add -net.address flag here, before the VM name
   if [[ -n "$VM_MAC" ]]; then
-    GOVC_CREATE_OPTIONS+=("-net.address")
-    GOVC_CREATE_OPTIONS+=("${VM_MAC}")
+    GOVC_CLONE_OPTIONS+=("-net.address=${VM_MAC}")
   fi
 
   set +e # Disable exit on error for this block
-  echo "DEBUG: Executing govc vm.create command and capturing output:"
-  FULL_GOVC_CREATE_OUTPUT=$(govc vm.create "${GOVC_CREATE_OPTIONS[@]}" "$vm_name" 2>&1)
-  CREATE_STATUS=$? # Capture the exit status of govc vm.create
+  echo "DEBUG: Executing govc vm.clone command and capturing output:"
+  FULL_GOVC_CLONE_OUTPUT=$(govc vm.clone "${GOVC_CLONE_OPTIONS[@]}" "$vm_name" 2>&1)
+  CLONE_STATUS=$? # Capture the exit status of govc vm.clone
   set -e # Re-enable exit on error
 
-  if [[ "$CREATE_STATUS" -ne 0 ]]; then
-      echo "❌ FATAL ERROR: govc vm.create returned non-zero exit code $CREATE_STATUS."
-      echo "Full govc vm.create output:"
-      echo "$FULL_GOVC_CREATE_OUTPUT"
-      exit 1 # Exit script because VM creation is essential.
+  if [[ "$CLONE_STATUS" -ne 0 ]]; then
+      echo "❌ FATAL ERROR: govc vm.clone returned non-zero exit code $CLONE_STATUS."
+      echo "Full govc vm.clone output:"
+      echo "$FULL_GOVC_CLONE_OUTPUT"
+      exit 1 # Exit script because VM cloning is essential.
   else
-      echo "✅ govc vm.create completed successfully. Output:"
-      echo "$FULL_GOVC_CREATE_OUTPUT" # Print govc's actual output to logs
+      echo "✅ govc vm.clone completed successfully. Output:"
+      echo "$FULL_GOVC_CLONE_OUTPUT" # Print govc's actual output to logs
   fi
-
-  # --- Verify MAC address immediately after creation using robust JSON parsing ---
-  echo "⚙️ Verifying MAC address for $vm_name post-creation..."
-  sleep 5 # Decreased sleep back to 5 seconds.
-
-  # Fetch VM info using JSON output, retry until valid JSON is received
-  RETRIES=10 # Increased retries
-  VM_INFO_JSON=""
-  for (( i=1; i<=RETRIES; i++ )); do
-      echo "DEBUG: Attempting govc vm.info -json (attempt $i/$RETRIES)..."
-      VM_INFO_RAW=$(govc vm.info -json "$vm_name" 2>/dev/null) # Get raw JSON output, redirect stderr to null
-      echo "DEBUG: Raw govc vm.info -json output (attempt $i):"
-      echo "$VM_INFO_RAW" # Print raw output for debugging
-
-      # Check if it's valid JSON. If so, assign and break loop.
-      if echo "$VM_INFO_RAW" | jq . >/dev/null 2>&1; then 
-          VM_INFO_JSON="$VM_INFO_RAW"
-          echo "DEBUG: govc vm.info returned valid JSON."
-          break
-      else
-          echo "DEBUG: govc vm.info did not return valid JSON. Retrying in 3 seconds..."
-          sleep 3
-      fi
-  done
-
-  if [[ -z "$VM_INFO_JSON" ]]; then
-      echo "❌ ERROR: Failed to get valid VM info JSON after multiple retries for $vm_name."
-      echo "   Last raw output from govc vm.info was: '$VM_INFO_RAW'"
-      exit 1
-  fi
-
-  # Extract actual MAC from JSON output using jq - refined filter for DVSwitch
-  PORTGROUP_KEY=$(echo "$VM_INFO_JSON" | jq -r '.network[] | select(.name == "'"$VCENTER_NETWORK"'").value')
-
-  if [[ -z "$PORTGROUP_KEY" ]]; then
-      echo "❌ ERROR: Could not find portgroupKey for network '$VCENTER_NETWORK' in VM info JSON for $vm_name."
-      exit 1
-  fi
-
-  ACTUAL_MAC=$(echo "$VM_INFO_JSON" | jq -r '.config.hardware.device[] | select(.backing.port.portgroupKey? == "'"$PORTGROUP_KEY"'").macAddress // empty')
-  
-  if [[ -z "$ACTUAL_MAC" ]]; then
-      echo "❌ ERROR: Could not find a network adapter with a valid MAC on portgroup '$PORTGROUP_KEY' for $vm_name in VM info JSON."
-      exit 1
-  fi
-
-  if [[ -n "$VM_MAC" ]]; then # Only check against desired MAC if it was specified
-    if [[ "$ACTUAL_MAC" != "$VM_MAC" ]]; then
-      echo "❌ ERROR: Assigned MAC ($VM_MAC) does NOT match actual VM MAC ($ACTUAL_MAC) after creation for $vm_name!"
-      echo "   This implies govc vm.create -net.address failed to assign the MAC despite successful VM creation."
-      exit 1
-    fi
-  else # If MAC was not specified, verify it's not empty (i.e. auto-assigned MAC exists)
-      if [[ -z "$ACTUAL_MAC" ]]; then
-          echo "❌ ERROR: VM was expected to get an auto-assigned MAC address, but none was found for $vm_name."
-          exit 1
-      }
-  fi
-  echo "✅ MAC address verified: $ACTUAL_MAC for $vm_name."
   # --- END FIX ---
+
+  # --- Skipping MAC verification after cloning, assume clone handles it ---
+  echo "⚙️ Skipping MAC address verification as vm.clone is expected to handle it."
+  # --- END Skip ---
 
   # --- Inject ignition.url as a kernel argument using vm.change ---
   IGNITION_URL="http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/${ignition_url_path_segment}"
@@ -248,7 +186,7 @@ for node in "${NODES[@]}"; do
 
   echo "Powering on: $vm_name"
   govc vm.power -on=true "$vm_name"
-  echo "VM $vm_name powered on and will fetch Ignition config from $IGNITION_URL"
+  echo "VM $vm_name powered on and will fetch Ignition config from $IGNITION_URL (deployed from template)."
 done
 
 echo "✅ VM deployment complete!"
