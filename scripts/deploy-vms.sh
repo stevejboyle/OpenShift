@@ -28,7 +28,7 @@ source "${SCRIPTS_DIR}/load-vcenter-env.sh" "$CLUSTER_YAML"
 
 # Define the VM folder name based on clusterName from YAML
 CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
-VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}" # e.g., ocp416
+VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}" 
 
 # Construct the full path for the cluster's VM folder based on GOVC_FOLDER
 FULL_VCENTER_VM_FOLDER_PATH="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"

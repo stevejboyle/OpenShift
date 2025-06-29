@@ -1,6 +1,4 @@
-# Sample cluster YAML file (e.g., more-clusters/ocp416.yaml)
-
-clusterName: ocp416 
+clusterName: cigna-lab 
 baseDomain: openshift.sboyle.internal 
 vcenter_server: vcenter1.sboyle.internal
 vcenter_username: administrator@vsphere.sboyle.internal # Use your vCenter SSO domain
@@ -52,7 +50,6 @@ network:
   #  - ip: 192.168.42.102
   #    interface_name: ens192
 
-# Add this section to your more-clusters/ocp416.yaml
 # Ensure these MAC addresses are unique in your environment
 # and fall within VMware's OUI range if not pre-defined in vCenter.
 # Example VMware OUI: 00:50:56 (followed by three unique hex octets)
