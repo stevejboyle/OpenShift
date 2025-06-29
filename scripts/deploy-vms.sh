@@ -182,6 +182,28 @@ for node in "${NODES[@]}"; do
   IGNITION_CONFIG_B64=$(base64 -i "$ignition_file_local" | tr -d '\n')
   KERNEL_ARGS="console=ttyS0,115200 ignition.debug coreos.platform=vsphere cgroup_no_v1=all systemd.unified_cgroup_hierarchy=1 swapaccount=1 noswap"
 
+  #--- DEBUG: Verify ignition_file_local ---
+  echo "DEBUG: Checking local ignition file: $ignition_file_local"
+  if [[ ! -f "$ignition_file_local" ]]; then
+    echo "❌ ERROR: Local ignition file not found: $ignition_file_local"
+    exit 1
+  fi
+  LOCAL_IGN_SIZE=$(stat -f %z "$ignition_file_local" 2>/dev/null || stat -c %s "$ignition_file_local" 2>/dev/null)
+  echo "DEBUG: Local ignition file size: $LOCAL_IGN_SIZE bytes"
+  echo "DEBUG: Local ignition file (first 5 lines):"
+  head -n 5 "$ignition_file_local"
+ 
+  # FIX: Force base64 to read from stdin, redirect stderr to /dev/null, check status
+  set +e # Disable exit on error for base64
+  # Use 'cat "$ignition_file_local"' instead of 'base64 -i' for robustness.
+  IGNITION_CONFIG_B64=$(cat "$ignition_file_local" | base64 -w0 2>/dev/null | tr -d '\n') # Using -w0 for GNU base64
+  BASE64_STATUS=$? # Capture base64 exit status
+  set -e # Re-enable exit on error
+ 
+  if [[ $BASE64_STATUS -ne 0 ]]; then
+      echo "❌ ERROR: base64 encoding of $ignition_file_local failed with exit code $BASE64_STATUS. Aborting."
+      exit 1
+  fi
 
   echo "⚙️ Injecting Ignition config data (base64) for $vm_name. Size: ${#IGNITION_CONFIG_B64} bytes."
   if ! govc vm.change -vm "$vm_name" \

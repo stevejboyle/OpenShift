@@ -41,10 +41,9 @@ log_step "4️⃣ Creating OpenShift manifests and initial ignition configs..."
 log_step "5️⃣ Injecting vSphere credentials into manifests..."
 "${SCRIPTS}/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
 
+
 log_step "6️⃣ Generating static IP manifests (if configured)..."
 "${SCRIPTS}/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
-
-# REMOVED: HTTP server start and trap (no longer needed as Ignition is injected via guestinfo.config.data)
 
 log_step "7️⃣ Deploying VMs..." # Re-numbered step
 "${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML" "$INSTALL_DIR"

@@ -67,5 +67,5 @@ node_macs:
   # worker-1: "00:50:56:XX:YY:06"
 
 ignition_server:
-  host_ip: 192.168.11.192 # The IP address of the machine running your deployment scripts (the HTTP server)
-  port: 8000 # Port for the HTTP server
+  host_ip: 192.168.42.5 # <--- MUST be your actual deployment host IP
+  port: 8000 # <--- MUST be an actual, valid port
