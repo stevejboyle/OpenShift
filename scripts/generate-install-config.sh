@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Usage: ./generate-install-config.sh <cluster-yaml>
+
 CLUSTER_YAML="$1"
 if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
@@ -35,7 +37,7 @@ echo "DEBUG: GOVC_PASSWORD_LENGTH=${#GOVC_PASSWORD} bytes"
 
 SSH_KEY_FILE_PATH=$(yq e '.sshKeyFile' "$CLUSTER_YAML" || { echo "❌ Failed to read sshKeyFile path from $CLUSTER_YAML"; exit 1; })
 if [[ ! -f "$SSH_KEY_FILE_PATH" ]]; then echo "❌ SSH key file not found: $SSH_KEY_FILE_PATH"; exit 1; fi
-SSH_KEY=$(<"$SSH_KEY_FILE_PATH")
+SSH_KEY=$(cat "$SSH_KEY_FILE_PATH" | tr -d '\r\n' | sed 's/^[ \t]*//;s/[ \t]*$//')
 echo "DEBUG: SSH_KEY_LENGTH=${#SSH_KEY} bytes"
 
 PULL_SECRET_FILE_PATH=$(yq e '.pullSecretFile' "$CLUSTER_YAML" || { echo "❌ Failed to read pullSecretFile path from $CLUSTER_YAML"; exit 1; })
@@ -50,6 +52,13 @@ NETWORK_CIDR=$(yq e '.network.cidr' "$CLUSTER_YAML" || { echo "❌ Failed to rea
 IGNITION_SERVER_IP=$(yq e '.ignition_server.host_ip' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.host_ip from $CLUSTER_YAML"; exit 1; })
 IGNITION_SERVER_PORT=$(yq e '.ignition_server.port' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.port from $CLUSTER_YAML"; exit 1; })
 
+# --- NEW: Read node counts from cluster YAML ---
+MASTER_REPLICAS=$(yq '.node_counts.master' "$CLUSTER_YAML" || { echo "❌ Failed to read node_counts.master from $CLUSTER_YAML"; exit 1; })
+WORKER_REPLICAS=$(yq '.node_counts.worker' "$CLUSTER_YAML" || { echo "❌ Failed to read node_counts.worker from $CLUSTER_YAML"; exit 1; })
+echo "DEBUG: MASTER_REPLICAS=$MASTER_REPLICAS"
+echo "DEBUG: WORKER_REPLICAS=$WORKER_REPLICAS"
+# --- END NEW ---
+
 # Read vCenter CA Certificate File Path from cluster YAML
 VCENTER_CA_CERT_FILE_PATH=$(yq e '.vcenter_ca_cert_file' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_ca_cert_file path from $CLUSTER_YAML"; exit 1; })
 if [[ ! -f "$VCENTER_CA_CERT_FILE_PATH" ]]; then
@@ -57,15 +66,21 @@ if [[ ! -f "$VCENTER_CA_CERT_FILE_PATH" ]]; then
   echo "   Please ensure the path in your cluster YAML is correct and the file exists."
   exit 1
 fi
-# No need for VCENTER_CA_CERT variable assignment here.
-# The processing will happen directly in the cat <<EOF block.
+VCENTER_CA_CERT="$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | sed 's/^[ \t]*//g')"
 
 # Debugging: Print a few critical variables
 echo "DEBUG: BASE_DOMAIN=$BASE_DOMAIN"
 echo "DEBUG: VCENTER_SERVER=$VCENTER_SERVER"
 echo "DEBUG: PULL_SECRET_LENGTH=${#PULL_SECRET} bytes"
 echo "DEBUG: SSH_KEY_LENGTH=${#SSH_KEY} bytes"
-# No VCENTER_CA_CERT_LENGTH debug here as it's not stored in a simple variable now.
+# Only print if VCENTER_CA_CERT is not empty
+if [[ -n "$VCENTER_CA_CERT" ]]; then
+  echo "DEBUG: VCENTER_CA_CERT_LENGTH=${#VCENTER_CA_CERT} bytes"
+  echo "DEBUG: Processed cert content (first 5 lines, stripped of internal leading spaces):"
+  echo "$VCENTER_CA_CERT" | head -n 5
+else
+  echo "DEBUG: VCENTER_CA_CERT is empty or not found."
+fi
 
 # Full paths required for OpenShift installer
 CLUSTER_PATH="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER"
@@ -97,17 +112,17 @@ platform:
         networks:
         - "$VCENTER_NETWORK"
   additionalTrustBundle: |
-$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | awk '{printf "    %s\n", $0}') # <-- This is the definitive fix
+    $(echo "$VCENTER_CA_CERT" | awk '{printf "    %s\n", $0}') # Ensure 4-space indent
 pullSecret: |
   $PULL_SECRET
 sshKey: |
-  $SSH_KEY
+  $SSH_KEY # SSH key should be on a single line, no extra newlines
 controlPlane:
   name: master
-  replicas: 3
+  replicas: ${MASTER_REPLICAS} # <--- FIX: Use dynamic MASTER_REPLICAS
 compute:
 - name: worker
-  replicas: 0
+  replicas: ${WORKER_REPLICAS} # <--- FIX: Use dynamic WORKER_REPLICAS
 networking:
   clusterNetwork:
   - cidr: 10.128.0.0/14

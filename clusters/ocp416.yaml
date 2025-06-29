@@ -61,10 +61,8 @@ node_macs:
   master-0: "00:50:56:00:42:02" # Replace XX:YY:02 with a unique suffix
   master-1: "00:50:56:00:42:03" # Replace XX:YY:03 with a unique suffix
   master-2: "00:50:56:00:42:04" # Replace XX:YY:04 with a unique suffix
-  # Workers can either use auto-assigned MACs (if using MachineConfig for static IPs, or DHCP)
-  # or you can specify them here if you want DHCP reservations for workers too.
-  # worker-0: "00:50:56:XX:YY:05"
-  # worker-1: "00:50:56:XX:YY:06"
+  worker-0: "00:50:56:00:42:11" # Replace XX:YY:04 with a unique suffix
+  worker-1: "00:50:56:00:42:12" # Replace XX:YY:04 with a unique suffix
 
 ignition_server:
   host_ip: 192.168.42.5 # <--- MUST be your actual deployment host IP
