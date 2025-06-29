@@ -1,0 +1,66 @@
+clusterName: cigna-test
+baseDomain: openshift.sboyle.internal 
+vcenter_server: vcenter1.sboyle.internal
+vcenter_username: administrator@vsphere.sboyle.internal # Use your vCenter SSO domain
+
+vcenter_datacenter: Lab 
+vcenter_cluster: "Lab Cluster" 
+vcenter_datastore: datastore-SAN1 
+vcenter_network: OpenShift_192.168.42.0
+vcenter_ca_cert_file: assets/vcenter1.sboyle.internal.cer
+
+sshKeyFile: assets/ssh-key.pub # Path to your SSH public key
+pullSecretFile: assets/pull-secret.json # Path to your pull secret JSON
+consolePasswordFile: assets/console-password.txt # Path to your htpasswd hash file
+
+rhcos_vm_template: /Lab/vm/OpenShift/RHCOS-4.16-Template
+
+node_counts:
+  master: 3
+  worker: 2 # Set to your desired initial worker count
+
+# VM Sizing for different node types
+vm_sizing:
+  bootstrap:
+    cpu: 4
+    memory_gb: 16
+    disk_gb: 120
+  master:
+    cpu: 8
+    memory_gb: 32
+    disk_gb: 120
+  worker:
+    cpu: 4
+    memory_gb: 16
+    disk_gb: 120
+
+# Network configuration for the cluster VMs
+network:
+  cidr: 192.168.42.0/24 # CIDR for the machine network
+  gateway: 192.168.42.1
+  dns_servers:
+    - 192.168.1.97
+    - 192.168.1.98
+
+  # Define static IPs for worker nodes if you plan to use them.
+  # If using DHCP for workers, you can remove this 'worker_static_ips' section.
+  # worker_static_ips:
+  #  - ip: 192.168.42.101
+  #    interface_name: ens192 # Common for vSphere RHCOS, verify in your VM
+  #  - ip: 192.168.42.102
+  #    interface_name: ens192
+
+# Ensure these MAC addresses are unique in your environment
+# and fall within VMware's OUI range if not pre-defined in vCenter.
+# Example VMware OUI: 00:50:56 (followed by three unique hex octets)
+node_macs:
+  bootstrap: "00:50:56:00:42:01" # Replace XX:YY:01 with a unique suffix
+  master-0: "00:50:56:00:42:02" # Replace XX:YY:02 with a unique suffix
+  master-1: "00:50:56:00:42:03" # Replace XX:YY:03 with a unique suffix
+  master-2: "00:50:56:00:42:04" # Replace XX:YY:04 with a unique suffix
+  worker-0: "00:50:56:00:42:11" # Replace XX:YY:04 with a unique suffix
+  worker-1: "00:50:56:00:42:12" # Replace XX:YY:04 with a unique suffix
+
+ignition_server:
+  host_ip: 192.168.42.5 # <--- MUST be your actual deployment host IP
+  port: 8000 # <--- MUST be an actual, valid port
