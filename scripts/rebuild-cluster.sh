@@ -34,12 +34,14 @@ log_step "3️⃣ Generating install-config.yaml"
 "$SCRIPTS/generate-install-config.sh" "$CLUSTER_YAML"
 
 log_step "3️⃣c Running openshift-install to create ignition configs..."
+timestamp=$(date +%Y%m%d-%H%M%S)
+cp "$INSTALL_DIR/install-config.yaml" "$INSTALL_DIR/install-config.yaml.$timestamp.bak"
 openshift-install create manifests --dir="$INSTALL_DIR"
 openshift-install create ignition-configs --dir="$INSTALL_DIR"
 echo "✅ Ignition configs generated at $INSTALL_DIR"
 
 log_step "4️⃣ Injecting vSphere credentials into manifests"
-"$SCRIPTS/generate-vsphere-creds-manifests.sh" "$CLUSTER_YAML"
+"$SCRIPTS/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
 
 log_step "5️⃣ Deploying VMs"
 "$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
