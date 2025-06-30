@@ -11,16 +11,39 @@ if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   exit 1
 fi
 
-# Load values from cluster YAML
 CLUSTER_NAME=$(yq e '.clusterName' "$CLUSTER_YAML")
-VM_FOLDER=$(yq e '.vcenter_folder' "$CLUSTER_YAML")
-VM_FOLDER="${VM_FOLDER:-/Lab/vm/OpenShift/$CLUSTER_NAME}"
+VCENTER_DATACENTER=$(yq e '.vcenter_datacenter' "$CLUSTER_YAML")
 
-echo "🧹 Deleting VMs in folder: $VM_FOLDER"
-govc vm.destroy -folder="$VM_FOLDER" -dc="$(yq e '.vcenter_datacenter' "$CLUSTER_YAML")" "*" || true
+# Check if custom folder is defined; if not, use fallback
+VCENTER_FOLDER=$(yq e '.vcenter_folder // ""' "$CLUSTER_YAML")
+if [[ -z "$VCENTER_FOLDER" || "$VCENTER_FOLDER" == "null" ]]; then
+  VCENTER_FOLDER="/$VCENTER_DATACENTER/vm/OpenShift/$CLUSTER_NAME"
+fi
 
-echo "🗑️ Deleting install-configs directory for $CLUSTER_NAME"
+echo "🧹 Looking for VMs in folder: $VCENTER_FOLDER"
+
+# Find all VMs under the folder
+VM_PATHS=$(govc find "$VCENTER_FOLDER" -type m || true)
+
+if [[ -z "$VM_PATHS" ]]; then
+  echo "⚠️  No VMs found under folder: $VCENTER_FOLDER"
+else
+  echo "🗑️  Deleting VMs:"
+  echo "$VM_PATHS"
+  while read -r vm; do
+    govc vm.destroy "$vm" || echo "⚠️ Failed to destroy VM: $vm"
+  done <<< "$VM_PATHS"
+fi
+
+echo "🧼 Attempting to delete VM folder (if empty): $VCENTER_FOLDER"
+govc folder.destroy "$VCENTER_FOLDER" || echo "⚠️ Skipped folder deletion (likely not empty or in use)"
+
 INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
-rm -rf "$INSTALL_DIR"
+if [[ -d "$INSTALL_DIR" ]]; then
+  echo "🗑️  Deleting install-configs directory: $INSTALL_DIR"
+  rm -rf "$INSTALL_DIR"
+else
+  echo "ℹ️  No install-configs directory found for $CLUSTER_NAME"
+fi
 
-echo "✅ Cluster VMs and install artifacts removed for: $CLUSTER_NAME"
+echo "✅ Cluster cleanup complete for: $CLUSTER_NAME"
