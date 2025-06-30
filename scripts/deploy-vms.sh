@@ -190,8 +190,6 @@ for node in "${NODES[@]}"; do
   fi
   LOCAL_IGN_SIZE=$(stat -f %z "$ignition_file_local" 2>/dev/null || stat -c %s "$ignition_file_local" 2>/dev/null)
   echo "DEBUG: Local ignition file size: $LOCAL_IGN_SIZE bytes"
-  echo "DEBUG: Local ignition file (first 5 lines):"
-  head -n 5 "$ignition_file_local"
  
   # FIX: Force base64 to read from stdin, redirect stderr to /dev/null, check status
   set +e # Disable exit on error for base64

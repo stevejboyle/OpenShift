@@ -9,9 +9,9 @@ This project provides a fully automated script suite to deploy an OpenShift 4.16
 ```
 OpenShift/
 ├── clusters/
-│   └── cigna-test.yaml               # Your main cluster configuration
+│   └── test.yaml                     # Your main cluster configuration
 ├── install-configs/
-│   └── cigna-test/                   # Generated install-config and ignition files
+│   └── test/                         # Generated install-config and ignition files
 ├── manifests/                        # Custom manifests if needed
 ├── scripts/                          # Automation scripts
 └── README.md
@@ -23,12 +23,12 @@ OpenShift/
 
 ### 1. Configure Cluster YAML
 
-Edit or create your cluster YAML in the `clusters/` directory (e.g. `clusters/cigna-test.yaml`).
+Edit or create your cluster YAML in the `clusters/` directory (e.g. `clusters/test.yaml`).
 
 ### 2. Rebuild Cluster
 
 ```bash
-scripts/rebuild-cluster.sh clusters/cigna-test.yaml
+scripts/rebuild-cluster.sh clusters/test.yaml
 ```
 
 This script will:
@@ -92,7 +92,7 @@ After successful run:
 To fully delete a cluster:
 
 ```bash
-scripts/delete-cluster.sh clusters/cigna-test.yaml
+scripts/delete-cluster.sh clusters/test.yaml
 ```
 
 ---
