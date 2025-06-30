@@ -61,7 +61,6 @@ This script will:
 |----------------------------------|----------------------------------------------------------|
 | `rebuild-cluster.sh`             | Main orchestration script                                |
 | `generate-install-config.sh`     | Creates `install-config.yaml` dynamically                |
-| `generate-vsphere-creds-manifest.sh` | Injects vSphere creds into manifests                 |
 | `deploy-vms.sh`                  | Clones and configures all VMs from a base template       |
 | `cleanup-bootstrap.sh`           | Deletes the bootstrap VM after ignition completes        |
 | `fix-cloud-provider-taints.sh`   | Removes cloud-provider taints from master nodes          |
