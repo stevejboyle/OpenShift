@@ -1,4 +1,4 @@
-# OpenShift 4.16 UPI Deployment on vSphere – cigna-test
+# OpenShift 4.16 UPI Deployment on vSphere
 
 This repository contains scripts and configuration for deploying a Red Hat OpenShift 4.16 cluster using **User-Provisioned Infrastructure (UPI)** on **vSphere** with a DHCP-based IP architecture.
 
@@ -11,7 +11,7 @@ This repository contains scripts and configuration for deploying a Red Hat OpenS
   - Bootstrap and masters: DHCP with **reservations**
   - Workers: DHCP with **reservations** (e.g., `.41`, `.42`)
 - **DNS:** All forward and reverse records are manually managed via BIND
-- **Cluster Name:** `cigna-test`
+- **Cluster Name:** `Test`
 - **Base Domain:** `openshift.sboyle.internal`
 
 ---
@@ -21,7 +21,7 @@ This repository contains scripts and configuration for deploying a Red Hat OpenS
 ```
 OpenShift/
 ├── assets/                        # Pull secrets, SSH keys, certs
-├── clusters/                      # YAML defining cluster layout (e.g., cigna-test.yaml)
+├── clusters/                      # YAML defining cluster layout (e.g., test.yaml)
 ├── install-configs/              # Generated manifests and config
 ├── scripts/                       # Deployment automation scripts
 ├── govc.env                       # vSphere connection variables
@@ -53,7 +53,7 @@ OpenShift/
 - All nodes use DHCP — masters/bootstrap/workers use **reserved MAC→IP** mappings.
 - BIND zone files must include A and PTR records for:
   - `api`, `api-int`, `*.apps`, `bootstrap`, `master-*`, `worker-*`, `lb`
-- Ensure MAC addresses in `cigna-test.yaml` match your DHCP server reservations.
+- Ensure MAC addresses in `test.yaml` match your DHCP server reservations.
 
 ---
 
@@ -61,10 +61,10 @@ OpenShift/
 
 ```bash
 # Validate vCenter credentials
-./scripts/validate-credentials.sh clusters/cigna-test.yaml
+./scripts/validate-credentials.sh clusters/test.yaml
 
 # Rebuild the cluster
-./scripts/rebuild-cluster.sh clusters/cigna-test.yaml
+./scripts/rebuild-cluster.sh clusters/test.yaml
 ```
 
 ---
@@ -82,7 +82,7 @@ Place the following in `assets/`:
 ## 🧼 Cleanup
 
 ```bash
-./scripts/delete-cluster.sh clusters/cigna-test.yaml
+./scripts/delete-cluster.sh clusters/test.yaml
 ```
 
 ---
