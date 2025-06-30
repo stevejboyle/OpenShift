@@ -1,41 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPTS")"
+
 CLUSTER_YAML="$1"
+
 if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
-  echo "❌ Usage: $0 <cluster-yaml>"
+  echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
 
-SCRIPTS_DIR="$(cd "$(dirname "$0")" && pwd)"
+CLUSTER_NAME=$(yq e '.clusterName' "$CLUSTER_YAML")
+INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
+MANIFESTS_DIR="$INSTALL_DIR/manifests"
 
-# Source load-vcenter-env.sh to ensure GOVC_USERNAME and GOVC_PASSWORD are set
-# This script is responsible for securely prompting for the password.
-source "${SCRIPTS_DIR}/load-vcenter-env.sh"
+mkdir -p "$MANIFESTS_DIR"
 
-# Now, GOVC_USERNAME and GOVC_PASSWORD should be available in the environment.
-# Check if they are set (though load-vcenter-env.sh should handle this).
-if [[ -z "${GOVC_USERNAME:-}" || -z "${GOVC_PASSWORD:-}" ]]; then
-  echo "❌ vCenter credentials (GOVC_USERNAME or GOVC_PASSWORD) are not set in the environment."
-  echo "   Ensure load-vcenter-env.sh is correctly setting them."
+VCENTER_SERVER=$(yq e '.vcenter.server' "$CLUSTER_YAML")
+VCENTER_USERNAME=$(yq e '.vcenter.username' "$CLUSTER_YAML")
+VCENTER_PASSWORD=$(yq e '.vcenter.password' "$CLUSTER_YAML")
+
+if [[ -z "$VCENTER_SERVER" || -z "$VCENTER_USERNAME" || -z "$VCENTER_PASSWORD" ]]; then
+  echo "❌ Missing vCenter credentials in YAML"
   exit 1
 fi
 
-CLUSTER_NAME="$(yq '.clusterName' "$CLUSTER_YAML")"
-MANIFEST_DIR="${SCRIPTS_DIR}/../install-configs/${CLUSTER_NAME}/manifests"
-
-mkdir -p "$MANIFEST_DIR"
-
-cat > "${MANIFEST_DIR}/vsphere-creds-secret.yaml" <<EOF
+cat > "${MANIFESTS_DIR}/vsphere-cloud-creds.yaml" <<EOF
 apiVersion: v1
 kind: Secret
 metadata:
-  name: vsphere-cloud-credentials
-  namespace: openshift-machine-api
+  name: vsphere-creds
+  namespace: openshift-config
 type: Opaque
-data:
-  username: $(echo -n "$GOVC_USERNAME" | base64)
-  password: $(echo -n "$GOVC_PASSWORD" | base64)
+stringData:
+  ${VCENTER_SERVER}.username: ${VCENTER_USERNAME}
+  ${VCENTER_SERVER}.password: ${VCENTER_PASSWORD}
 EOF
 
-echo "✅ Generated vSphere credentials secret manifest at: ${MANIFEST_DIR}/vsphere-creds-secret.yaml"
+echo "✅ vSphere credentials manifest created: ${MANIFESTS_DIR}/vsphere-cloud-creds.yaml"

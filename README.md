@@ -1,119 +1,108 @@
-# OpenShift UPI vSphere Deployment Scripts
+# OpenShift 4.16 UPI Deployment on vSphere
 
-This repository contains automation scripts to deploy a Red Hat OpenShift cluster using the User-Provisioned Infrastructure (UPI) model on vSphere. It supports end-to-end provisioning, configuration, bootstrap monitoring, taint/label management, and cleanup.
-
----
-
-## 🔧 Requirements
-
-- macOS or Linux system
-- `yq`, `jq`, `govc`, `openshift-install`, `oc`, and `kubectl` installed and in `$PATH`
-- vCenter credentials and environment variables (`load-vcenter-env.sh`)
-- Red Hat OpenShift pull secret
+This project provides a fully automated script suite to deploy an OpenShift 4.16 cluster on a vSphere environment using UPI (User Provisioned Infrastructure). The scripts assume a macOS or Linux host with necessary tools pre-installed.
 
 ---
 
-## 📁 Directory Layout
+## 📁 Directory Structure
 
 ```
 OpenShift/
-├── clusters/               # Cluster YAML definitions
-├── install-configs/        # Generated install directories per cluster
-├── scripts/                # Automation scripts
+├── clusters/
+│   └── cigna-test.yaml               # Your main cluster configuration
+├── install-configs/
+│   └── cigna-test/                   # Generated install-config and ignition files
+├── manifests/                        # Custom manifests if needed
+├── scripts/                          # Automation scripts
 └── README.md
 ```
 
 ---
 
-## 📝 Cluster YAML Format
+## 🚀 Quick Start
 
-Each cluster definition must specify the following:
+### 1. Configure Cluster YAML
 
-```yaml
-clusterName: test
-baseDomain: openshift.sboyle.internal
-vcenter_server: vcenter1.sboyle.internal
-vcenter_username: administrator@vsphere.sboyle.internal
-vcenter_datacenter: Lab
-vcenter_cluster: Lab Cluster
-vcenter_datastore: datastore-SAN1
-vcenter_network: OpenShift_192.168.42.0
-vcenter_ca_cert_file: ./certs/vcenter-ca.crt
-sshKeyFile: ~/.ssh/id_rsa.pub
-pullSecretFile: ./pull-secret.json
-network:
-  cidr: 192.168.42.0/24
-node_counts:
-  master: 3
-  worker: 2
-labels:
-  master:
-    node-role.kubernetes.io/infra: ""
-  worker:
-    node-role.kubernetes.io/compute: ""
-```
+Edit or create your cluster YAML in the `clusters/` directory (e.g. `clusters/cigna-test.yaml`).
 
----
-
-## 🚀 Primary Workflow
-
-### Rebuild a Cluster
+### 2. Rebuild Cluster
 
 ```bash
-./scripts/rebuild-cluster.sh clusters/test.yaml
+scripts/rebuild-cluster.sh clusters/cigna-test.yaml
 ```
 
-This will:
-- Load environment variables
-- Delete any previous cluster (via `delete-cluster.sh`)
+This script will:
+- Load vCenter environment
+- Delete any previous cluster VMs
 - Generate `install-config.yaml`
-- Backup the install-config to `install-configs/<cluster>/backups/`
-- Create ignition configs
-- Inject vSphere credentials
-- Deploy all VMs
+- Generate ignition files
+- Create VMs and assign MACs
 - Wait for bootstrap to complete
-- Remove the bootstrap VM
-- Apply taint fixes
-- Label nodes dynamically
+- Delete bootstrap node
+- Fix cloud-provider taints
+- Apply node labels
+- Display the kubeadmin password and login info
 
 ---
 
-## 🛠 Available Scripts
+## 🛠 Required Tools
 
-| Script                          | Description |
-|---------------------------------|-------------|
-| `cleanup-bootstrap.sh`         | Deletes the bootstrap node after install |
-| `deploy-vms.sh`                | Creates bootstrap/master/worker VMs using govc |
-| `fix-cloud-provider-taints.sh` | Removes unwanted taints from control-plane |
-| `generate-console-password-manifests.sh` | Creates a manifest with a default kubeadmin password |
-| `generate-core-user-password.sh` | Creates a manifest for a "core" user with password login |
-| `generate-install-config.sh`   | Builds install-config.yaml from YAML input |
-| `generate-vsphere-creds-manifest.sh` | Injects vSphere secrets into manifest |
-| `label-nodes.sh`               | Dynamically applies labels to all nodes based on cluster YAML |
-| `load-vcenter-env.sh`          | Loads and exports GOVC_* variables |
-| `rebuild-cluster.sh`           | One-command full rebuild of the OpenShift cluster |
-| `delete-cluster.sh`            | (Optional) Removes previously running VMs and install dirs |
+- `openshift-install`
+- `govc`
+- `oc`
+- `jq`
+- `yq` (YAML processor)
 
 ---
 
-## 📦 Backups
+## 📜 Scripts
 
-The `install-config.yaml` is automatically backed up before ignition creation:
+| Script                            | Purpose                                                  |
+|----------------------------------|----------------------------------------------------------|
+| `rebuild-cluster.sh`             | Main orchestration script                                |
+| `generate-install-config.sh`     | Creates `install-config.yaml` dynamically                |
+| `generate-vsphere-creds-manifest.sh` | Injects vSphere creds into manifests                 |
+| `deploy-vms.sh`                  | Clones and configures all VMs from a base template       |
+| `cleanup-bootstrap.sh`           | Deletes the bootstrap VM after ignition completes        |
+| `fix-cloud-provider-taints.sh`   | Removes cloud-provider taints from master nodes          |
+| `label-nodes.sh`                 | Dynamically labels nodes using cluster YAML              |
+| `load-vcenter-env.sh`            | Sources `GOVC_*` env vars needed by govc                 |
+| `delete-cluster.sh`              | Deletes all cluster-related VMs in vCenter               |
+
+---
+
+## 📂 Output
+
+After successful run:
+- Ignition files are in `install-configs/<clusterName>/`
+- VM objects are created under `/Lab/vm/OpenShift/<clusterName>/`
+- Console and `kubeadmin` login info is displayed
+
+---
+
+## 🔐 Security
+
+- No secrets are stored in version control.
+- vSphere password and sensitive configs are sourced securely.
+
+---
+
+## 🧹 Cleanup
+
+To fully delete a cluster:
+
+```bash
+scripts/delete-cluster.sh clusters/cigna-test.yaml
 ```
-install-configs/<cluster>/backups/install-config.<timestamp>.yaml
-```
 
 ---
 
-## ✅ Status
+## 📘 Notes
 
-Stable and complete for local UPI deployments. Extendable for:
-- Custom MachineConfigs
-- Additional manifests
-- Ingress reconfiguration
+- Assumes DNS and DHCP infrastructure is preconfigured
+- Reverse DNS and static DHCP reservations are **strongly** recommended
+- Manifests should be placed in `manifests/` if needed, prior to rebuild
 
 ---
 
-## 📬 Questions?
-
-Contact: `sboyle@paloaltonetworks.com`
+© 2025 Steve Boyle. Licensed for private cluster automation use.
