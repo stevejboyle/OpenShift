@@ -14,6 +14,9 @@ fi
 CLUSTER_NAME=$(yq e '.clusterName' "$CLUSTER_YAML")
 INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
 
+# Load vCenter environment variables
+source "${SCRIPTS}/load-vcenter-env.sh"
+
 log_step() {
   echo -e "\n⏱ $(date +'%F %T') - $1"
 }
@@ -33,19 +36,15 @@ log_step "3️⃣ Generating install-config.yaml"
 log_step "3️⃣c Running openshift-install to create ignition configs..."
 openshift-install create manifests --dir="$INSTALL_DIR"
 openshift-install create ignition-configs --dir="$INSTALL_DIR"
-
 echo "✅ Ignition configs generated at $INSTALL_DIR"
 
 log_step "4️⃣ Injecting vSphere credentials into manifests"
 "$SCRIPTS/generate-vsphere-creds-manifests.sh" "$CLUSTER_YAML"
 
-log_step "5️⃣ Creating VM folders (if needed)"
-"$SCRIPTS/create-folder.sh" "$CLUSTER_YAML"
-
-log_step "6️⃣ Deploying VMs"
+log_step "5️⃣ Deploying VMs"
 "$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
 
-log_step "7️⃣ Monitoring bootstrap progress (wait for completion)"
+log_step "6️⃣ Monitoring bootstrap progress (wait for completion)"
 echo "⏳ Waiting for bootstrap to complete..."
 while true; do
   BOOTSTRAP_STATUS=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
@@ -55,14 +54,13 @@ while true; do
   fi
   echo "⌛ Still waiting for bootstrap to complete..."
   sleep 30
-  # optional: add timeout logic here
 done
 
-log_step "8️⃣ Removing bootstrap VM"
+log_step "7️⃣ Removing bootstrap VM"
 "$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
 
-log_step "9️⃣ Applying taint fix and labels"
+log_step "8️⃣ Applying taint fix and node labels"
 "$SCRIPTS/fix-cloud-provider-taints.sh"
 "$SCRIPTS/label-nodes.sh" "$CLUSTER_YAML"
 
-echo "🎉 Cluster rebuild complete."
+echo -e "\n🎉 Cluster rebuild complete."
