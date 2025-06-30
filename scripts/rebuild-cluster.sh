@@ -18,49 +18,30 @@ SCRIPTS="$(dirname "$0")"
 source "${SCRIPTS}/load-vcenter-env.sh"
 
 log_step() {
-  echo -e "\n⏱ $(date +'%Y-%m-%d %H:%M:%S') - $1"
+  echo
+  echo "⏱ $(date '+%F %T') - $1..."
 }
 
-# Define INSTALL_DIR here so it's available for subsequent scripts
-INSTALL_DIR="install-configs/$(yq eval '.clusterName' "$CLUSTER_YAML")"
-CLUSTER_NAME="$(yq eval '.clusterName' "$CLUSTER_YAML")" # Get cluster name
-
-# 1. Validate vSphere credentials once at the very beginning
-log_step "1️⃣ Validating vSphere credentials and resources..."
-"${SCRIPTS}/validate-credentials.sh" "$CLUSTER_YAML"
-
-log_step "2️⃣ Deleting previous cluster (if exists)..."
+log_step "1️⃣ Deleting previous cluster (if exists)"
 "${SCRIPTS}/delete-cluster.sh" "$CLUSTER_YAML"
 
-log_step "3️⃣ Generating install-config.yaml..."
-"${SCRIPTS}/generate-install-config.sh" "$CLUSTER_YAML"
-
-log_step "4️⃣ Creating OpenShift manifests and initial ignition configs..."
-"${SCRIPTS}/configure-cluster.sh" "$CLUSTER_YAML"
-
-log_step "5️⃣ Injecting vSphere credentials into manifests..."
+log_step "2️⃣ Generating vsphere credentials manifest"
 "${SCRIPTS}/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
 
+log_step "3️⃣ Generating install-config.yaml"
+"${SCRIPTS}/generate-install-config.sh" "$CLUSTER_YAML"
 
-log_step "6️⃣ Generating static IP manifests (if configured)..."
-"${SCRIPTS}/generate-static-ip-manifests.sh" "$CLUSTER_YAML"
+log_step "4️⃣ Generating console user/password manifest"
+"${SCRIPTS}/generate-console-password-manifests.sh" "$CLUSTER_YAML"
 
-log_step "7️⃣ Deploying VMs..." # Re-numbered step
-"${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
+log_step "5️⃣ Generating core user/password manifest"
+"${SCRIPTS}/generate-core-user-password.sh" "$CLUSTER_YAML"
 
-log_step "8️⃣ Monitoring bootstrap progress (this may take 15-30 minutes)..." # Re-numbered step
-if ! "${SCRIPTS}/monitor-bootstrap.sh" "$CLUSTER_YAML"; then
-  echo "❌ Bootstrap failed or timed out. Check logs: $LOGFILE"
-  exit 1
-fi
-echo "✅ Bootstrap complete!"
+log_step "6️⃣ Deploying VMs"
+"${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML"
 
-log_step "9️⃣ Fixing cloud provider taints..." # Re-numbered step
-if ! "${SCRIPTS}/fix-cloud-provider-taints.sh" "$INSTALL_DIR"; then
-  echo "⚠️ Failed to remove cloud provider taints. This may indicate an issue with cloud-controller-manager."
-fi
+log_step "7️⃣ Monitoring bootstrap process"
+"${SCRIPTS}/monitor-bootstrap.sh" "$CLUSTER_YAML"
 
 END_TS=$(date +%s)
-DURATION=$((END_TS - START_TS))
-echo -e "\n🎉 Rebuild complete in $((DURATION / 60))m $((DURATION % 60))s"
-echo "📄 Full log saved at: $LOGFILE"
+echo "✅ Cluster rebuild complete in $((END_TS - START_TS)) seconds"

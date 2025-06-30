@@ -42,14 +42,6 @@ network:
     - 192.168.1.97
     - 192.168.1.98
 
-  # Define static IPs for worker nodes if you plan to use them.
-  # If using DHCP for workers, you can remove this 'worker_static_ips' section.
-  # worker_static_ips:
-  #  - ip: 192.168.42.101
-  #    interface_name: ens192 # Common for vSphere RHCOS, verify in your VM
-  #  - ip: 192.168.42.102
-  #    interface_name: ens192
-
 # Ensure these MAC addresses are unique in your environment
 # and fall within VMware's OUI range if not pre-defined in vCenter.
 # Example VMware OUI: 00:50:56 (followed by three unique hex octets)
