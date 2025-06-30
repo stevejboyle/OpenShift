@@ -43,9 +43,6 @@ openshift-install create manifests --dir="$INSTALL_DIR"
 openshift-install create ignition-configs --dir="$INSTALL_DIR"
 echo "✅ Ignition configs generated at $INSTALL_DIR"
 
-log_step "6️⃣ Injecting vSphere credentials into manifests"
-"$SCRIPTS/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
-
 log_step "7️⃣ Deploying VMs"
 "$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
 
