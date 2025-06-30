@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CLUSTER_YAML="$1"
-INSTALL_DIR="$2" # Capture INSTALL_DIR as the second argument
+INSTALL_DIR="${2:-install-configs/$(basename "$CLUSTER_YAML" .yaml)}"
 
 if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
