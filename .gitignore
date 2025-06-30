@@ -15,6 +15,7 @@ assets/core-user-password.txt
 .vcenterpw
 assets/*.pem
 assets/*.cer
+clusters/cigna-test.yaml
 
 # SSH Keys (keep public keys, ignore private)
 assets/*id_rsa
