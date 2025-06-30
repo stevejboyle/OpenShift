@@ -13,8 +13,8 @@ fi
 
 CLUSTER_NAME=$(yq e '.clusterName' "$CLUSTER_YAML")
 INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
+BACKUP_DIR="$INSTALL_DIR/backups"
 
-# Load vCenter environment variables
 source "${SCRIPTS}/load-vcenter-env.sh"
 
 log_step() {
@@ -25,28 +25,34 @@ log_step "1️⃣ Validating input YAML file..."
 echo "✅ Cluster name: $CLUSTER_NAME"
 echo "✅ Install directory: $INSTALL_DIR"
 
-log_step "2️⃣ Cleaning up previous install directory..."
+log_step "2️⃣ Deleting previous cluster (if exists)..."
+"${SCRIPTS}/delete-cluster.sh" "$CLUSTER_YAML"
+
+log_step "3️⃣ Resetting install directory..."
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"
 echo "✅ Directory reset: $INSTALL_DIR"
 
-log_step "3️⃣ Generating install-config.yaml"
+log_step "4️⃣ Generating install-config.yaml"
 "$SCRIPTS/generate-install-config.sh" "$CLUSTER_YAML"
 
-log_step "3️⃣c Running openshift-install to create ignition configs..."
-timestamp=$(date +%Y%m%d-%H%M%S)
-cp "$INSTALL_DIR/install-config.yaml" "$INSTALL_DIR/install-config.yaml.$timestamp.bak"
+log_step "4️⃣b Backing up install-config.yaml"
+mkdir -p "$BACKUP_DIR"
+cp "$INSTALL_DIR/install-config.yaml" "$BACKUP_DIR/install-config.$(date +%Y%m%d%H%M%S).yaml"
+echo "✅ install-config.yaml backed up to: $BACKUP_DIR"
+
+log_step "5️⃣ Running openshift-install to create ignition configs"
 openshift-install create manifests --dir="$INSTALL_DIR"
 openshift-install create ignition-configs --dir="$INSTALL_DIR"
 echo "✅ Ignition configs generated at $INSTALL_DIR"
 
-log_step "4️⃣ Injecting vSphere credentials into manifests"
+log_step "6️⃣ Injecting vSphere credentials into manifests"
 "$SCRIPTS/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
 
-log_step "5️⃣ Deploying VMs"
+log_step "7️⃣ Deploying VMs"
 "$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
 
-log_step "6️⃣ Monitoring bootstrap progress (wait for completion)"
+log_step "8️⃣ Monitoring bootstrap progress (wait for completion)"
 echo "⏳ Waiting for bootstrap to complete..."
 while true; do
   BOOTSTRAP_STATUS=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
@@ -58,11 +64,11 @@ while true; do
   sleep 30
 done
 
-log_step "7️⃣ Removing bootstrap VM"
+log_step "9️⃣ Removing bootstrap VM"
 "$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
 
-log_step "8️⃣ Applying taint fix and node labels"
+log_step "🔟 Applying taint fix and node labels"
 "$SCRIPTS/fix-cloud-provider-taints.sh"
 "$SCRIPTS/label-nodes.sh" "$CLUSTER_YAML"
 
-echo -e "\n🎉 Cluster rebuild complete."
+echo -e "\n🎉 OpenShift cluster rebuild complete!"
