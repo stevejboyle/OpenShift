@@ -46,10 +46,6 @@ echo "DEBUG: PULL_SECRET_LENGTH=${#PULL_SECRET} bytes"
 # Network details from YAML
 NETWORK_CIDR=$(yq e '.network.cidr' "$CLUSTER_YAML" || { echo "❌ Failed to read network.cidr from $CLUSTER_YAML"; exit 1; })
 
-# Ignition Server details from YAML
-IGNITION_SERVER_IP=$(yq e '.ignition_server.host_ip' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.host_ip from $CLUSTER_YAML"; exit 1; })
-IGNITION_SERVER_PORT=$(yq e '.ignition_server.port' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.port from $CLUSTER_YAML"; exit 1; })
-
 # --- NEW: Read node counts from cluster YAML ---
 MASTER_REPLICAS=$(yq '.node_counts.master' "$CLUSTER_YAML" || { echo "❌ Failed to read node_counts.master from $CLUSTER_YAML"; exit 1; })
 WORKER_REPLICAS=$(yq '.node_counts.worker' "$CLUSTER_YAML" || { echo "❌ Failed to read node_counts.worker from $CLUSTER_YAML"; exit 1; })
@@ -102,8 +98,8 @@ platform:
         datastore: $DATASTORE_PATH
         networks:
         - "$VCENTER_NETWORK"
-  additionalTrustBundle: |
-$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | awk '{printf "    %s\n", $0}') # <-- This is the definitive fix
+additionalTrustBundle: |
+$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | awk '{printf "      %s\n", $0}')
 pullSecret: |
   $PULL_SECRET
 sshKey: |
@@ -123,9 +119,6 @@ networking:
   networkType: OVNKubernetes
   serviceNetwork:
   - 172.30.0.0/16
-ignition:
-  version: 3.2.0
-  url: http://${IGNITION_SERVER_IP}:${IGNITION_SERVER_PORT}/bootstrap.ign
 EOF
 
 # Add a check for file size after creation

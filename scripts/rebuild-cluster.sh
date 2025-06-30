@@ -1,47 +1,68 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
+BASE_DIR="$(dirname "$SCRIPTS")"
+
 CLUSTER_YAML="$1"
-if [[ -z "${CLUSTER_YAML:-}" || ! -f "$CLUSTER_YAML" ]]; then
-  echo "Usage: $0 <cluster.yaml>"
+
+if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
+  echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
 
-LOGFILE="/tmp/rebuild-cluster-$(basename "$CLUSTER_YAML" .yaml)-$(date +%s).log"
-exec > >(tee "$LOGFILE") 2>&1
-
-echo "🔁 Rebuilding cluster using config: $CLUSTER_YAML"
-START_TS=$(date +%s)
-
-SCRIPTS="$(dirname "$0")"
-# Source load-vcenter-env.sh once at the beginning for all subsequent scripts
-source "${SCRIPTS}/load-vcenter-env.sh"
+CLUSTER_NAME=$(yq e '.clusterName' "$CLUSTER_YAML")
+INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
 
 log_step() {
-  echo
-  echo "⏱ $(date '+%F %T') - $1..."
+  echo -e "\n⏱ $(date +'%F %T') - $1"
 }
 
-log_step "1️⃣ Deleting previous cluster (if exists)"
-"${SCRIPTS}/delete-cluster.sh" "$CLUSTER_YAML"
+log_step "1️⃣ Validating input YAML file..."
+echo "✅ Cluster name: $CLUSTER_NAME"
+echo "✅ Install directory: $INSTALL_DIR"
 
-log_step "2️⃣ Generating vsphere credentials manifest"
-"${SCRIPTS}/generate-vsphere-creds-manifest.sh" "$CLUSTER_YAML"
+log_step "2️⃣ Cleaning up previous install directory..."
+rm -rf "$INSTALL_DIR"
+mkdir -p "$INSTALL_DIR"
+echo "✅ Directory reset: $INSTALL_DIR"
 
 log_step "3️⃣ Generating install-config.yaml"
-"${SCRIPTS}/generate-install-config.sh" "$CLUSTER_YAML"
+"$SCRIPTS/generate-install-config.sh" "$CLUSTER_YAML"
 
-log_step "4️⃣ Generating console user/password manifest"
-"${SCRIPTS}/generate-console-password-manifests.sh" "$CLUSTER_YAML"
+log_step "3️⃣c Running openshift-install to create ignition configs..."
+openshift-install create manifests --dir="$INSTALL_DIR"
+openshift-install create ignition-configs --dir="$INSTALL_DIR"
 
-log_step "5️⃣ Generating core user/password manifest"
-"${SCRIPTS}/generate-core-user-password.sh" "$CLUSTER_YAML"
+echo "✅ Ignition configs generated at $INSTALL_DIR"
+
+log_step "4️⃣ Injecting vSphere credentials into manifests"
+"$SCRIPTS/generate-vsphere-creds-manifests.sh" "$CLUSTER_YAML"
+
+log_step "5️⃣ Creating VM folders (if needed)"
+"$SCRIPTS/create-folder.sh" "$CLUSTER_YAML"
 
 log_step "6️⃣ Deploying VMs"
-"${SCRIPTS}/deploy-vms.sh" "$CLUSTER_YAML"
+"$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
 
-log_step "7️⃣ Monitoring bootstrap process"
-"${SCRIPTS}/monitor-bootstrap.sh" "$CLUSTER_YAML"
+log_step "7️⃣ Monitoring bootstrap progress (wait for completion)"
+echo "⏳ Waiting for bootstrap to complete..."
+while true; do
+  BOOTSTRAP_STATUS=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
+  if [[ "$BOOTSTRAP_STATUS" == "True" ]]; then
+    echo "✅ Bootstrap completed."
+    break
+  fi
+  echo "⌛ Still waiting for bootstrap to complete..."
+  sleep 30
+  # optional: add timeout logic here
+done
 
-END_TS=$(date +%s)
-echo "✅ Cluster rebuild complete in $((END_TS - START_TS)) seconds"
+log_step "8️⃣ Removing bootstrap VM"
+"$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
+
+log_step "9️⃣ Applying taint fix and labels"
+"$SCRIPTS/fix-cloud-provider-taints.sh"
+"$SCRIPTS/label-nodes.sh" "$CLUSTER_YAML"
+
+echo "🎉 Cluster rebuild complete."

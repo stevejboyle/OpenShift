@@ -1,4 +1,4 @@
-clusterName: test
+clusterName: cigna-test
 baseDomain: openshift.sboyle.internal 
 vcenter_server: vcenter1.sboyle.internal
 vcenter_username: administrator@vsphere.sboyle.internal # Use your vCenter SSO domain
@@ -53,6 +53,12 @@ node_macs:
   worker-0: "00:50:56:00:42:11" # Replace XX:YY:04 with a unique suffix
   worker-1: "00:50:56:00:42:12" # Replace XX:YY:04 with a unique suffix
 
-ignition_server:
-  host_ip: 192.168.42.5 # <--- MUST be your actual deployment host IP
-  port: 8000 # <--- MUST be an actual, valid port
+labels:
+  master:
+    - env=dev
+    - role=master
+    - region=primary
+  worker:
+    - env=dev
+    - role=worker
+    - region=primary

@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-INSTALL_DIR="$1"
-export KUBECONFIG="$INSTALL_DIR/auth/kubeconfig"
-echo "Checking for cloud provider taints..."
+
+echo "🔧 Removing NoSchedule taint from master nodes..."
+oc adm taint nodes -l node-role.kubernetes.io/master node-role.kubernetes.io/master:NoSchedule- || true
+echo "✅ Taints removed from master nodes."
+
+echo "🔧 Applying cloud provider labels to all nodes..."
 for node in $(oc get nodes -o name); do
-  if oc describe "$node" | grep -q "node.cloudprovider.kubernetes.io/uninitialized"; then
-    echo "Removing taint from $node"
-    oc adm taint nodes "$node" node.cloudprovider.kubernetes.io/uninitialized:NoSchedule-
-  fi
+  oc label --overwrite $node 'node.cloudprovider.kubernetes.io/shutdown=false'
+  oc label --overwrite $node 'node.openshift.io/os_id=rhcos'
 done
+echo "✅ Cloud provider labels applied."

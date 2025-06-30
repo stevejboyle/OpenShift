@@ -1,93 +1,85 @@
-# OpenShift 4.16 UPI Deployment on vSphere
+# OpenShift 4.x UPI Deployment (vSphere) - Automated Workflow
 
-This repository contains scripts and configuration for deploying a Red Hat OpenShift 4.16 cluster using **User-Provisioned Infrastructure (UPI)** on **vSphere** with a DHCP-based IP architecture.
-
----
-
-## 🧱 Architecture Summary
-
-- **Platform:** vSphere with manual VM provisioning using `govc`
-- **IP Assignment:** All nodes use DHCP
-  - Bootstrap and masters: DHCP with **reservations**
-  - Workers: DHCP with **reservations** (e.g., `.41`, `.42`)
-- **DNS:** All forward and reverse records are manually managed via BIND
-- **Cluster Name:** `Test`
-- **Base Domain:** `openshift.sboyle.internal`
+This repository automates the end-to-end deployment of a Red Hat OpenShift 4.x cluster using a UPI (User Provisioned Infrastructure) approach on vSphere.
 
 ---
 
-## 📁 Folder Structure
+## 🧱 Project Structure
 
 ```
-OpenShift/
-├── assets/                        # Pull secrets, SSH keys, certs
-├── clusters/                      # YAML defining cluster layout (e.g., test.yaml)
-├── install-configs/              # Generated manifests and config
-├── scripts/                       # Deployment automation scripts
-├── govc.env                       # vSphere connection variables
-└── .vcenterpw                     # Password file (secure)
+.
+├── clusters/                  # Cluster-specific YAML configs (e.g., cigna-test.yaml)
+├── install-configs/          # Generated OpenShift install and ignition files
+├── manifests/                # Custom OpenShift manifests
+├── scripts/                  # Automation scripts
+└── README.md
 ```
 
 ---
 
-## ⚙️ Key Scripts
+## 🚀 Deployment Flow
 
-| Script | Purpose |
-|--------|---------|
-| `generate-vsphere-creds-manifest.sh` | Generates vsphere credentials manifest |
-| `generate-install-config.sh` | Generates `install-config.yaml` with DHCP-based networking |
-| `generate-console-password-manifests.sh` | Creates manifest for console access user |
-| `generate-core-user-password.sh` | Creates core user credentials |
-| `deploy-vms.sh` | Provisions VMs using `govc` with no static IP logic |
-| `monitor-bootstrap.sh` | Monitors bootstrap node readiness |
-| `rebuild-cluster.sh` | End-to-end rebuild runner (DHCP-ready) |
-| `delete-cluster.sh` | Tears down all cluster VMs |
-| `validate-credentials.sh` | Validates vCenter access credentials |
+### Prerequisites:
+- macOS or Linux with `bash`, `yq`, `oc`, `govc`, `openshift-install`
+- vCenter credentials and CA certificate
+- DHCP server with reservations for bootstrap + masters
+- DNS entries for OpenShift cluster
+- A valid Red Hat pull secret
+- A public SSH key
 
-> ⚠️ `generate-static-ip-manifests.sh` has been deprecated and removed.
+### Main Workflow:
 
----
+1. **Prepare your Cluster YAML**
+   - Modify `clusters/cigna-test.yaml` to reflect your environment:
+     - Cluster name, base domain
+     - vCenter network/storage/cluster
+     - Node counts
+     - File paths for SSH key, pull secret, and vCenter CA cert
 
-## 🧾 DNS & DHCP Notes
-
-- All nodes use DHCP — masters/bootstrap/workers use **reserved MAC→IP** mappings.
-- BIND zone files must include A and PTR records for:
-  - `api`, `api-int`, `*.apps`, `bootstrap`, `master-*`, `worker-*`, `lb`
-- Ensure MAC addresses in `test.yaml` match your DHCP server reservations.
-
----
-
-## 🚀 Quick Start
-
+2. **Run the cluster rebuild**
 ```bash
-# Validate vCenter credentials
-./scripts/validate-credentials.sh clusters/test.yaml
+./scripts/rebuild-cluster.sh clusters/cigna-test.yaml
+```
 
-# Rebuild the cluster
-./scripts/rebuild-cluster.sh clusters/test.yaml
+This performs:
+- Wipes and regenerates `install-config.yaml`
+- Creates OpenShift ignition files
+- Injects vSphere credentials into manifests
+- Creates VMs (masters, workers, bootstrap)
+- Monitors bootstrap status
+- Deletes the bootstrap VM after bootstrap completes
+- Removes cloud provider taints
+- Labels master and worker nodes (based on YAML input)
+
+---
+
+## 🛠️ Custom Scripts
+
+| Script                          | Purpose                                                    |
+|---------------------------------|------------------------------------------------------------|
+| `generate-install-config.sh`    | Generates `install-config.yaml` from YAML                 |
+| `generate-vsphere-creds-manifests.sh` | Adds cloud credentials to OpenShift manifests        |
+| `deploy-vms.sh`                 | Deploys bootstrap, master, and worker VMs via `govc`      |
+| `cleanup-bootstrap.sh`         | Verifies bootstrap completion and deletes the bootstrap VM |
+| `fix-cloud-provider-taints.sh` | Removes `NoSchedule` taint from master nodes              |
+| `label-nodes.sh`               | Applies labels defined in cluster YAML                    |
+
+---
+
+## 📡 Example DNS Configuration
+
+Make sure your DNS (forward + reverse) is configured like this:
+
+```text
+api.cigna-test.openshift.sboyle.internal.     A   192.168.42.10
+*.apps.cigna-test.openshift.sboyle.internal.  A   192.168.42.20
+bootstrap.cigna-test.openshift.sboyle.internal. A 192.168.42.30
+master-0.cigna-test.openshift.sboyle.internal.  A 192.168.42.31
+...
 ```
 
 ---
 
-## 🔐 Required Secrets
+## 📆 Last Updated
 
-Place the following in `assets/`:
-- `ssh-key.pub` – Public SSH key for core user access
-- `pull-secret.json` – Red Hat pull secret
-- `console-password.txt` – Htpasswd format password file for UI access
-- `vcenter1.sboyle.internal.cer` – CA cert for secure vSphere connection
-
----
-
-## 🧼 Cleanup
-
-```bash
-./scripts/delete-cluster.sh clusters/test.yaml
-```
-
----
-
-## 📌 Notes
-
-- Requires `govc`, `yq`, and `jq` on the system path
-- Designed for manual DNS environments and controlled vSphere clusters
+2025-06-30 02:09:17
