@@ -132,4 +132,3 @@ else
 fi
 
 echo "✅ Generated install-config.yaml at: $INSTALL_DIR/install-config.yaml"
-echo "⚠️  Remember to inject vSphere credentials into manifests later (via generate-vsphere-creds-manifests.sh)."
