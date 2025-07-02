@@ -3,6 +3,7 @@ govc.env
 assets/pull-secret.json
 .vcenterpw
 clusters/cigna-test.yaml
+install-configs/*
 
 # Backup and Temporary Files
 manifests-backup-*/
