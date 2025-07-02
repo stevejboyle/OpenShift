@@ -1,0 +1,9 @@
+apiVersion: v1
+data:
+  password: SHRlY2g2MzExIQ==
+  username: YWRtaW5pc3RyYXRvckB2c3BoZXJlLnNib3lsZS5pbnRlcm5hbA==
+kind: Secret
+metadata:
+  creationTimestamp: null
+  name: vsphere-creds
+  namespace: openshift-cluster-api-guests

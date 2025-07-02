@@ -1,0 +1,17 @@
+# Sensitive Configuration Files
+govc.env
+assets/pull-secret.json
+.vcenterpw
+clusters/cigna-test.yaml
+
+# Backup and Temporary Files
+manifests-backup-*/
+*.tmp
+*.bak
+*.backup
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

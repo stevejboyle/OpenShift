@@ -39,8 +39,11 @@ cp "$INSTALL_DIR/install-config.yaml" "$INSTALL_DIR/install-config.yaml.bak"
 echo "✅ install-config.yaml backed up"
 
 log_step "5️⃣ Running openshift-install to create ignition configs..."
+rm -rf "$INSTALL_DIR"/{*.ign,manifests,openshift}
 openshift-install create manifests --dir="$INSTALL_DIR"
 openshift-install create ignition-configs --dir="$INSTALL_DIR"
+log_step "✅ Verifying bootstrap.ign has MCS..."
+grep -q '"name": "mcs.service"' "$INSTALL_DIR/bootstrap.ign" && echo "✅ MCS found in bootstrap.ign" || echo "❌ MCS MISSING!"
 echo "✅ Ignition configs generated at $INSTALL_DIR"
 
 log_step "7️⃣ Deploying VMs"

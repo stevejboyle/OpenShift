@@ -1,0 +1,1 @@
+{"clusterName":"cigna-test","clusterID":"01780463-8b8e-4feb-88d2-55313351ce1e","infraID":"cigna-test-pfdwp","vsphere":{"vCenter":"vcenter1.sboyle.internal","username":"administrator@vsphere.sboyle.internal","password":"Htech6311!","terraform_platform":"vsphere"},"featureSet":"","customFeatureSet":null}

@@ -1,0 +1,30 @@
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: VSphereMachine
+metadata:
+  creationTimestamp: null
+  labels:
+    cluster.x-k8s.io/control-plane: ""
+  name: cigna-test-pfdwp-master-2
+  namespace: openshift-cluster-api-guests
+spec:
+  cloneMode: fullClone
+  customVMXKeys:
+    guestinfo.domain: cigna-test.openshift.sboyle.internal
+    guestinfo.hostname: cigna-test-pfdwp-master-2
+    stealclock.enable: "TRUE"
+  datacenter: Lab
+  datastore: /Lab/datastore/datastore-SAN1
+  diskGiB: 120
+  folder: /Lab/vm/cigna-test-pfdwp
+  memoryMiB: 16384
+  network:
+    devices:
+    - dhcp4: true
+      networkName: /Lab/host/Lab Cluster/OpenShift_192.168.42.0
+  numCPUs: 4
+  numCoresPerSocket: 4
+  resourcePool: /Lab/host/Lab Cluster/Resources
+  server: vcenter1.sboyle.internal
+  template: cigna-test-pfdwp-rhcos-region-a-zone-a
+status:
+  ready: false
