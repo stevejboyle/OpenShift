@@ -36,7 +36,7 @@ else
 fi
 
 echo "🧼 Attempting to delete VM folder (if empty): $VCENTER_FOLDER"
-govc folder.destroy "$VCENTER_FOLDER" || echo "⚠️ Skipped folder deletion (likely not empty or in use)"
+govc object.destroy "$VCENTER_FOLDER" || echo "⚠️ Skipped folder deletion (likely not empty or in use)"
 
 INSTALL_DIR="$BASE_DIR/install-configs/$CLUSTER_NAME"
 if [[ -d "$INSTALL_DIR" ]]; then
