@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPTS")"
+export OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP=true
 
 CLUSTER_YAML="$1"
 
@@ -35,13 +36,11 @@ echo "✅ Directory reset: $INSTALL_DIR"
 
 log_step "4️⃣ Generating install-config.yaml"
 "$SCRIPTS/generate-install-config.sh" "$CLUSTER_YAML"
-cp "$INSTALL_DIR/install-config.yaml" "$INSTALL_DIR/install-config.yaml.bak"
-echo "✅ install-config.yaml backed up"
 
 log_step "5️⃣ Running openshift-install to create ignition configs..."
 rm -rf "$INSTALL_DIR"/{*.ign,manifests,openshift}
-openshift-install create manifests --dir="$INSTALL_DIR"
-openshift-install create ignition-configs --dir="$INSTALL_DIR"
+openshift-install create manifests --dir="$INSTALL_DIR --log-level=debug"
+openshift-install create ignition-configs --dir="$INSTALL_DIR --log-level=debug"
 log_step "✅ Verifying bootstrap.ign has MCS..."
 grep -q '"name": "mcs.service"' "$INSTALL_DIR/bootstrap.ign" && echo "✅ MCS found in bootstrap.ign" || echo "❌ MCS MISSING!"
 echo "✅ Ignition configs generated at $INSTALL_DIR"

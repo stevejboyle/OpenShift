@@ -80,6 +80,7 @@ baseDomain: $BASE_DOMAIN
 metadata:
   name: $CLUSTER_NAME
 platform:
+  type: vsphere
   vsphere:
     vcenters:
     - server: $VCENTER_SERVER
