@@ -53,6 +53,14 @@ node_macs:
   worker-0: "00:50:56:00:42:11" # Replace XX:YY:04 with a unique suffix
   worker-1: "00:50:56:00:42:12" # Replace XX:YY:04 with a unique suffix
 
+node_ips:
+  bootstrap: "192.168.42.30"
+  master-0: "192.168.42.31"
+  master-1: "192.168.42.32"
+  master-2: "192.168.42.33"
+  worker-0: "192.168.42.40"
+  worker-1: "192.168.42.41"
+
 labels:
   master:
     - env=dev
