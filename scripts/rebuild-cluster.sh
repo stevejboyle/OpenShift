@@ -60,7 +60,7 @@ while true; do
 done
 
 log_step "9️⃣ Removing bootstrap VM"
-"$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
+#"$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
 
 log_step "🔟 Applying taint fix and labels"
 "$SCRIPTS/fix-cloud-provider-taints.sh"
