@@ -80,25 +80,7 @@ baseDomain: $BASE_DOMAIN
 metadata:
   name: $CLUSTER_NAME
 platform:
-  type: vsphere
-  vsphere:
-    vcenters:
-    - server: $VCENTER_SERVER
-      user: $VCENTER_USERNAME
-      password: $GOVC_PASSWORD
-      datacenters:
-      - Lab
-    failureDomains:
-    - name: primary
-      server: $VCENTER_SERVER
-      region: region-a
-      zone: zone-a
-      topology:
-        datacenter: Lab
-        computeCluster: $CLUSTER_PATH
-        datastore: $DATASTORE_PATH
-        networks:
-        - "$VCENTER_NETWORK"
+  none: {}
 additionalTrustBundle: |
 $(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | awk '{printf "      %s\n", $0}')
 pullSecret: |

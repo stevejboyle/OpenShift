@@ -38,12 +38,10 @@ log_step "4️⃣ Generating install-config.yaml"
 "$SCRIPTS/generate-install-config.sh" "$CLUSTER_YAML"
 
 log_step "5️⃣ Running openshift-install to create ignition configs..."
+cp "$INSTALL_DIR"/install-config.yaml "$INSTALL_DIR"/install-config.yaml.bak
 rm -rf "$INSTALL_DIR"/{*.ign,manifests,openshift}
 openshift-install create manifests --dir="$INSTALL_DIR" --log-level=debug
 openshift-install create ignition-configs --dir="$INSTALL_DIR" --log-level=debug
-log_step "✅ Verifying bootstrap.ign has MCS..."
-grep -q '"name": "mcs.service"' "$INSTALL_DIR/bootstrap.ign" && echo "✅ MCS found in bootstrap.ign" || echo "❌ MCS MISSING!"
-echo "✅ Ignition configs generated at $INSTALL_DIR"
 
 log_step "7️⃣ Deploying VMs"
 "$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
@@ -61,8 +59,8 @@ while true; do
   # optional: add timeout logic here
 done
 
-#log_step "9️⃣ Removing bootstrap VM"
-#"$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
+log_step "9️⃣ Removing bootstrap VM"
+"$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
 
 log_step "🔟 Applying taint fix and labels"
 "$SCRIPTS/fix-cloud-provider-taints.sh"
