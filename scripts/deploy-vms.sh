@@ -67,7 +67,6 @@ done
 echo "VMs to deploy: ${NODES[@]}"
 
 echo "⏱ $(date '+%Y-%m-%d %H:%M:%S') - 🚀 Deploying VMs..."
-
 for node in "${NODES[@]}"; do
   vm_name="${CLUSTER_NAME}-$node"
 
@@ -77,10 +76,12 @@ for node in "${NODES[@]}"; do
       ignition_file_local="$INSTALL_DIR/bootstrap.ign" # Local file to base64 encode
       ;;
     "master-"*)
-      ignition_file_local="$INSTALL_DIR/master.ign"   # Local file to base64 encode
+      # Use individual master ignition files with network config
+      ignition_file_local="$INSTALL_DIR/${node}.ign"   # e.g., master-0.ign, master-1.ign
       ;;
     "worker-"*)
-      ignition_file_local="$INSTALL_DIR/worker.ign"   # Local file to base64 encode
+      # Use individual worker ignition files with network config  
+      ignition_file_local="$INSTALL_DIR/${node}.ign"   # e.g., worker-0.ign, worker-1.ign
       ;;
     *)
       echo "❌ Unknown node type: $node. Cannot determine ignition file."
@@ -88,36 +89,12 @@ for node in "${NODES[@]}"; do
       ;;
   esac
 
-  # Determine sizing based on node type
-  CPU=4
-  MEMORY_GB=16
-  DISK_GB=120
-  VM_MAC="" # Initialize MAC variable
-
-  case "$node" in
-    "bootstrap")
-      CPU=$(yq '.vm_sizing.bootstrap.cpu' "$CLUSTER_YAML")
-      MEMORY_GB=$(yq '.vm_sizing.bootstrap.memory_gb' "$CLUSTER_YAML")
-      DISK_GB=$(yq '.vm_sizing.bootstrap.disk_gb' "$CLUSTER_YAML")
-      VM_MAC=$(yq ".node_macs.bootstrap" "$CLUSTER_YAML" || true)
-      ;;
-    "master-"*)
-      CPU=$(yq '.vm_sizing.master.cpu' "$CLUSTER_YAML")
-      MEMORY_GB=$(yq '.vm_sizing.master.memory_gb' "$CLUSTER_YAML")
-      DISK_GB=$(yq '.vm_sizing.master.disk_gb' "$CLUSTER_YAML")
-      VM_MAC=$(yq ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
-      ;;
-    "worker-"*)
-      CPU=$(yq '.vm_sizing.worker.cpu' "$CLUSTER_YAML")
-      MEMORY_GB=$(yq '.vm_sizing.worker.memory_gb' "$CLUSTER_YAML")
-      DISK_GB=$(yq '.vm_sizing.worker.disk_gb' "$CLUSTER_YAML")
-      VM_MAC=$(yq ".node_macs.\"${node}\"" "$CLUSTER_YAML" || true)
-      ;;
-    *)
-      echo "❌ Error: Sizing/MAC not defined for node type: $node"
-      exit 1
-      ;;
-  esac
+  # Verify the ignition file exists
+  if [[ ! -f "$ignition_file_local" ]]; then
+    echo "❌ ERROR: Ignition file not found: $ignition_file_local"
+    echo "   Make sure to run the network configuration scripts first"
+    exit 1
+  fi
 
   echo "Creating VM: $vm_name with ${CPU} vCPUs, ${MEMORY_GB}GB RAM, ${DISK_GB}GB Disk."
   if [[ -n "$VM_MAC" ]]; then

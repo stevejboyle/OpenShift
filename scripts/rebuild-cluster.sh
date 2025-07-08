@@ -43,30 +43,77 @@ rm -rf "$INSTALL_DIR"/{*.ign,manifests,openshift}
 openshift-install create manifests --dir="$INSTALL_DIR" --log-level=debug
 openshift-install create ignition-configs --dir="$INSTALL_DIR" --log-level=debug
 
-log_step "7️⃣ Deploying VMs"
+log_step "6️⃣ Generating network configurations to fix OVS conflicts..."
+echo "🔧 Creating NetworkManager configs to override VM template OVS bridges..."
+"$SCRIPTS/generate-network-manifests.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
+
+log_step "6.5️⃣ Merging network configs into ignition files..."
+echo "🔧 Injecting network configurations into individual node ignition files..."
+"$SCRIPTS/merge-network-ignition.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
+
+log_step "7️⃣ Deploying VMs with network-corrected ignition configs"
+echo "🚀 Deploying VMs with ignition files that will override OVS configuration..."
 "$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
 
 log_step "8️⃣ Monitoring bootstrap progress (wait for completion)"
 echo "⏳ Waiting for bootstrap to complete..."
+echo "💡 This may take 15-30 minutes as nodes override OVS config and initialize OVN-Kubernetes..."
+
+# Set kubeconfig for monitoring
+export KUBECONFIG="$INSTALL_DIR/auth/kubeconfig"
+
+# Wait for bootstrap completion with better error handling
+BOOTSTRAP_TIMEOUT=3600  # 60 minutes timeout
+BOOTSTRAP_START_TIME=$(date +%s)
+
 while true; do
-  BOOTSTRAP_STATUS=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' 2>/dev/null || echo "Unknown")
-  if [[ "$BOOTSTRAP_STATUS" == "True" ]]; then
-    echo "✅ Bootstrap completed."
-    break
+  CURRENT_TIME=$(date +%s)
+  ELAPSED_TIME=$((CURRENT_TIME - BOOTSTRAP_START_TIME))
+  
+  if [[ $ELAPSED_TIME -gt $BOOTSTRAP_TIMEOUT ]]; then
+    echo "❌ Bootstrap timed out after ${BOOTSTRAP_TIMEOUT} seconds"
+    echo "💡 Check cluster logs: openshift-install wait-for bootstrap-complete --dir=$INSTALL_DIR --log-level=debug"
+    exit 1
   fi
-  echo "⌛ Still waiting for bootstrap to complete..."
-  sleep 30
-  # optional: add timeout logic here
+  
+  # Check bootstrap completion
+  if openshift-install wait-for bootstrap-complete --dir="$INSTALL_DIR" --log-level=info; then
+    echo "✅ Bootstrap completed successfully!"
+    break
+  else
+    echo "⌛ Still waiting for bootstrap to complete... (elapsed: ${ELAPSED_TIME}s)"
+    sleep 30
+  fi
 done
 
 log_step "9️⃣ Removing bootstrap VM"
-#"$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
+echo "🧹 Cleaning up bootstrap node..."
+# Uncomment when ready to remove bootstrap
+# "$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
+echo "⚠️  Bootstrap cleanup commented out - remove manually when ready"
 
-log_step "🔟 Applying taint fix and labels"
+log_step "🔟 Waiting for cluster operators to stabilize..."
+echo "⏳ Waiting for cluster installation to complete..."
+if openshift-install wait-for install-complete --dir="$INSTALL_DIR" --log-level=info; then
+  echo "✅ Cluster installation completed!"
+else
+  echo "⚠️  Installation monitoring failed, but cluster may still be completing..."
+fi
+
+log_step "1️⃣1️⃣ Applying taint fix and labels"
+echo "🔧 Fixing cloud provider taints..."
 "$SCRIPTS/fix-cloud-provider-taints.sh"
+echo "🏷️  Applying node labels..."
 "$SCRIPTS/label-nodes.sh" "$CLUSTER_YAML"
 
-echo "🎉 Cluster rebuild complete."
+log_step "1️⃣2️⃣ Verifying cluster health"
+echo "🩺 Checking cluster operator status..."
+if oc get co --no-headers | grep -E "(False|Unknown|True.*True)" | head -5; then
+  echo "⚠️  Some operators may still be initializing - this is normal"
+  echo "💡 Run 'oc get co' to monitor operator status"
+fi
+
+echo -e "\n🎉 Cluster rebuild complete!"
 
 # Final step: Show kubeadmin login information
 log_step "🔐 Cluster access information"
@@ -77,6 +124,18 @@ if [[ -f "$KUBEADMIN_PASS_FILE" ]]; then
   echo "🌐 Console URL: https://console-openshift-console.apps.$CLUSTER_NAME.$(yq e '.baseDomain' "$CLUSTER_YAML")"
   echo "🔐 Login via CLI:"
   echo "oc login -u kubeadmin -p $KUBEADMIN_PASS https://api.$CLUSTER_NAME.$(yq e '.baseDomain' "$CLUSTER_YAML"):6443"
+  echo ""
+  echo "📊 Quick health check commands:"
+  echo "  oc get co                    # Check cluster operators"
+  echo "  oc get nodes                 # Check node status"  
+  echo "  oc get pods -A | grep -v Running  # Check for failed pods"
 else
   echo "⚠️ kubeadmin password not found in $KUBEADMIN_PASS_FILE"
 fi
+
+echo ""
+echo "💡 If you encounter OVS bridge issues:"
+echo "   1. Check: ssh core@master-X 'sudo nmcli con show'"
+echo "   2. Expected: No 'br-ex' or 'ovs-*' connections"
+echo "   3. Expected: 'ens192' or similar ethernet connection with static IP"
+echo "   4. Check OVN pods: oc get pods -n openshift-ovn-kubernetes"
