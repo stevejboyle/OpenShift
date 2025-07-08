@@ -39,8 +39,8 @@ log_step "4️⃣ Generating install-config.yaml"
 
 log_step "5️⃣ Running openshift-install to create ignition configs..."
 rm -rf "$INSTALL_DIR"/{*.ign,manifests,openshift}
-openshift-install create manifests --dir="$INSTALL_DIR --log-level=debug"
-openshift-install create ignition-configs --dir="$INSTALL_DIR --log-level=debug"
+openshift-install create manifests --dir="$INSTALL_DIR" --log-level=debug
+openshift-install create ignition-configs --dir="$INSTALL_DIR" --log-level=debug
 log_step "✅ Verifying bootstrap.ign has MCS..."
 grep -q '"name": "mcs.service"' "$INSTALL_DIR/bootstrap.ign" && echo "✅ MCS found in bootstrap.ign" || echo "❌ MCS MISSING!"
 echo "✅ Ignition configs generated at $INSTALL_DIR"
