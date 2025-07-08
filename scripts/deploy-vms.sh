@@ -38,8 +38,8 @@ RHCOS_VM_TEMPLATE_PATH=$(yq '.rhcos_vm_template' "$CLUSTER_YAML" || { echo "❌ 
 # --- END NEW ---
 
 # Read Ignition Server details (used for logging only now, not for actual fetching URL)
-IGNITION_SERVER_IP=$(yq '.ignition_server.host_ip' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.host_ip from $CLUSTER_YAML"; exit 1; })
-IGNITION_SERVER_PORT=$(yq '.ignition_server.port' "$CLUSTER_YAML" || { echo "❌ Failed to read ignition_server.port from $CLUSTER_YAML"; exit 1; })
+IGNITION_SERVER_IP=$(yq '.ignition_server.host_ip' "$CLUSTER_YAML" 2>/dev/null || echo "127.0.0.1")
+IGNITION_SERVER_PORT=$(yq '.ignition_server.port' "$CLUSTER_YAML" 2>/dev/null || echo "8080")
 
 # Ensure VM folder exists
 echo "🔍 Checking for VM folder: ${FULL_VCENTER_VM_FOLDER_PATH}..."
@@ -67,6 +67,7 @@ done
 echo "VMs to deploy: ${NODES[@]}"
 
 echo "⏱ $(date '+%Y-%m-%d %H:%M:%S') - 🚀 Deploying VMs..."
+
 for node in "${NODES[@]}"; do
   vm_name="${CLUSTER_NAME}-$node"
 
@@ -78,10 +79,18 @@ for node in "${NODES[@]}"; do
     "master-"*)
       # Use individual master ignition files with network config
       ignition_file_local="$INSTALL_DIR/${node}.ign"   # e.g., master-0.ign, master-1.ign
+      # Fallback to generic master.ign if individual file doesn't exist
+      if [[ ! -f "$ignition_file_local" ]]; then
+        ignition_file_local="$INSTALL_DIR/master.ign"
+      fi
       ;;
     "worker-"*)
       # Use individual worker ignition files with network config  
       ignition_file_local="$INSTALL_DIR/${node}.ign"   # e.g., worker-0.ign, worker-1.ign
+      # Fallback to generic worker.ign if individual file doesn't exist
+      if [[ ! -f "$ignition_file_local" ]]; then
+        ignition_file_local="$INSTALL_DIR/worker.ign"
+      fi
       ;;
     *)
       echo "❌ Unknown node type: $node. Cannot determine ignition file."
@@ -89,15 +98,45 @@ for node in "${NODES[@]}"; do
       ;;
   esac
 
-  # Verify the ignition file exists
-  if [[ ! -f "$ignition_file_local" ]]; then
-    echo "❌ ERROR: Ignition file not found: $ignition_file_local"
-    echo "   Make sure to run the network configuration scripts first"
-    exit 1
-  fi
+  # Determine sizing based on node type - with proper error handling
+  # Set default values first
+  CPU=4
+  MEMORY_GB=16
+  DISK_GB=120
+  VM_MAC=""
+
+  case "$node" in
+    "bootstrap")
+      CPU=$(yq '.vm_sizing.bootstrap.cpu' "$CLUSTER_YAML" 2>/dev/null || echo "4")
+      MEMORY_GB=$(yq '.vm_sizing.bootstrap.memory_gb' "$CLUSTER_YAML" 2>/dev/null || echo "16")
+      DISK_GB=$(yq '.vm_sizing.bootstrap.disk_gb' "$CLUSTER_YAML" 2>/dev/null || echo "120")
+      VM_MAC=$(yq ".node_macs.bootstrap" "$CLUSTER_YAML" 2>/dev/null || echo "")
+      ;;
+    "master-"*)
+      CPU=$(yq '.vm_sizing.master.cpu' "$CLUSTER_YAML" 2>/dev/null || echo "8")
+      MEMORY_GB=$(yq '.vm_sizing.master.memory_gb' "$CLUSTER_YAML" 2>/dev/null || echo "32")
+      DISK_GB=$(yq '.vm_sizing.master.disk_gb' "$CLUSTER_YAML" 2>/dev/null || echo "120")
+      VM_MAC=$(yq ".node_macs.\"${node}\"" "$CLUSTER_YAML" 2>/dev/null || echo "")
+      ;;
+    "worker-"*)
+      CPU=$(yq '.vm_sizing.worker.cpu' "$CLUSTER_YAML" 2>/dev/null || echo "4")
+      MEMORY_GB=$(yq '.vm_sizing.worker.memory_gb' "$CLUSTER_YAML" 2>/dev/null || echo "16")
+      DISK_GB=$(yq '.vm_sizing.worker.disk_gb' "$CLUSTER_YAML" 2>/dev/null || echo "120")
+      VM_MAC=$(yq ".node_macs.\"${node}\"" "$CLUSTER_YAML" 2>/dev/null || echo "")
+      ;;
+    *)
+      echo "❌ Error: Sizing/MAC not defined for node type: $node"
+      exit 1
+      ;;
+  esac
+
+  # Validate that values are reasonable (not null or empty)
+  if [[ -z "$CPU" || "$CPU" == "null" ]]; then CPU=4; fi
+  if [[ -z "$MEMORY_GB" || "$MEMORY_GB" == "null" ]]; then MEMORY_GB=16; fi
+  if [[ -z "$DISK_GB" || "$DISK_GB" == "null" ]]; then DISK_GB=120; fi
 
   echo "Creating VM: $vm_name with ${CPU} vCPUs, ${MEMORY_GB}GB RAM, ${DISK_GB}GB Disk."
-  if [[ -n "$VM_MAC" ]]; then
+  if [[ -n "$VM_MAC" && "$VM_MAC" != "null" ]]; then
     echo "   Desired MAC: $VM_MAC"
   else
     echo "   MAC will be auto-assigned by vCenter."
@@ -118,7 +157,7 @@ for node in "${NODES[@]}"; do
   )
 
   # Conditionally add -net.mac and -net.mac.type flags for cloning
-  if [[ -n "$VM_MAC" ]]; then
+  if [[ -n "$VM_MAC" && "$VM_MAC" != "null" ]]; then
     GOVC_CLONE_OPTIONS+=("-net.address=${VM_MAC}")
   fi
 
@@ -163,6 +202,7 @@ for node in "${NODES[@]}"; do
   echo "DEBUG: Checking local ignition file: $ignition_file_local"
   if [[ ! -f "$ignition_file_local" ]]; then
     echo "❌ ERROR: Local ignition file not found: $ignition_file_local"
+    echo "💡 Make sure to run the network configuration scripts first if using individual node ignition files"
     exit 1
   fi
   LOCAL_IGN_SIZE=$(stat -f %z "$ignition_file_local" 2>/dev/null || stat -c %s "$ignition_file_local" 2>/dev/null)
