@@ -4,6 +4,9 @@ set -euo pipefail
 SCRIPTS="$(cd "$(dirname "$0")" && pwd)"
 BASE_DIR="$(dirname "$SCRIPTS")"
 
+# Load vCenter environment variables
+source "$SCRIPTS/load-vcenter-env.sh"
+
 CLUSTER_YAML="$1"
 
 if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
