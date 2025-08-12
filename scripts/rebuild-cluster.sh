@@ -7,7 +7,7 @@ export OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP=true
 
 CLUSTER_YAML="$1"
 
-if [[ -z "${CLUSTER_YAML:-}" || ! -f "$CLUSTER_YAML" ]]; then
+if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
@@ -53,7 +53,7 @@ echo "🔧 Injecting network configurations into individual node ignition files.
 
 log_step "7️⃣ Deploying VMs with network-corrected ignition configs"
 echo "🚀 Deploying VMs with ignition files that will override OVS configuration..."
-"$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
+"$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
 
 log_step "8️⃣ Monitoring bootstrap progress (wait for completion)"
 echo "⏳ Waiting for bootstrap to complete..."
@@ -76,6 +76,7 @@ while true; do
     exit 1
   fi
   
+  # Check bootstrap completion
   if openshift-install wait-for bootstrap-complete --dir="$INSTALL_DIR" --log-level=info; then
     echo "✅ Bootstrap completed successfully!"
     break
@@ -86,8 +87,10 @@ while true; do
 done
 
 log_step "9️⃣ Removing bootstrap VM"
-echo "🧹 Bootstrap removal is manual in this runbook."
+echo "🧹 Cleaning up bootstrap node..."
+# Uncomment when ready to remove bootstrap
 # "$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
+echo "⚠️  Bootstrap cleanup commented out - remove manually when ready"
 
 log_step "🔟 Waiting for cluster operators to stabilize..."
 echo "⏳ Waiting for cluster installation to complete..."
@@ -104,21 +107,15 @@ echo "🏷️  Applying node labels..."
 "$SCRIPTS/label-nodes.sh" "$CLUSTER_YAML"
 
 log_step "1️⃣2️⃣ Verifying cluster health"
-for i in {1..40}; do
-  AVAILABLE=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' || echo "")
-  PROGRESSING=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' || echo "")
-  DEGRADED=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}' || echo "")
-  echo "ClusterVersion: Available=$AVAILABLE Progressing=$PROGRESSING Degraded=$DEGRADED"
-  if [[ "$AVAILABLE" == "True" && "$PROGRESSING" == "False" && "$DEGRADED" == "False" ]]; then
-    echo "✅ Cluster healthy."
-    break
-  fi
-  echo "⌛ Operators still settling… retry $i/40"
-  sleep 15
-done
+echo "🩺 Checking cluster operator status..."
+if oc get co --no-headers | grep -E "(False|Unknown|True.*True)" | head -5; then
+  echo "⚠️  Some operators may still be initializing - this is normal"
+  echo "💡 Run 'oc get co' to monitor operator status"
+fi
 
 echo -e "\n🎉 Cluster rebuild complete!"
 
+# Final step: Show kubeadmin login information
 log_step "🔐 Cluster access information"
 KUBEADMIN_PASS_FILE="$INSTALL_DIR/auth/kubeadmin-password"
 if [[ -f "$KUBEADMIN_PASS_FILE" ]]; then
@@ -129,9 +126,9 @@ if [[ -f "$KUBEADMIN_PASS_FILE" ]]; then
   echo "oc login -u kubeadmin -p $KUBEADMIN_PASS https://api.$CLUSTER_NAME.$(yq e '.baseDomain' "$CLUSTER_YAML"):6443"
   echo ""
   echo "📊 Quick health check commands:"
-  echo "  oc get co"
-  echo "  oc get nodes"  
-  echo "  oc get pods -A | grep -v Running"
+  echo "  oc get co                    # Check cluster operators"
+  echo "  oc get nodes                 # Check node status"  
+  echo "  oc get pods -A | grep -v Running  # Check for failed pods"
 else
   echo "⚠️ kubeadmin password not found in $KUBEADMIN_PASS_FILE"
 fi
@@ -140,5 +137,5 @@ echo ""
 echo "💡 If you encounter OVS bridge issues:"
 echo "   1. Check: ssh core@master-X 'sudo nmcli con show'"
 echo "   2. Expected: No 'br-ex' or 'ovs-*' connections"
-echo "   3. Expected: '${INTERFACE_NAME:-ens192}' ethernet connection with static IP"
+echo "   3. Expected: 'ens192' or similar ethernet connection with static IP"
 echo "   4. Check OVN pods: oc get pods -n openshift-ovn-kubernetes"

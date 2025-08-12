@@ -28,6 +28,10 @@ node_counts:
   master: 3
   worker: 2
 
+ignition_server:
+  host_ip: 192.168.11.103  # reachable by the VMs
+  port: 8088
+
 # Static IPs per node (used to generate NM keyfiles merged into ignition)
 node_ips:
   bootstrap: 192.168.42.30
@@ -66,10 +70,6 @@ ignition_server:
   host_ip: 192.168.42.10
   port: 8080
 
-# Paths to local files (on the machine running these scripts)
-sshKeyFile: /home/steve/.ssh/id_rsa.pub
-pullSecretFile: /home/steve/pull-secret.json
-vcenter_ca_cert_file: /home/steve/vcenter-ca.pem
 
 # Optional labels applied post-install
 labels:
