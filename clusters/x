@@ -1,0 +1,16 @@
+clusterName: cigna-test
+baseDomain: openshift.sboyle.internal 
+vcenter_server: vcenter1.sboyle.internal
+vcenter_username: administrator@vsphere.sboyle.internal # Use your vCenter SSO domain
+
+vcenter_datacenter: Lab 
+vcenter_cluster: "Lab Cluster" 
+vcenter_datastore: datastore-SAN1 
+vcenter_network: OpenShift_192.168.42.0
+vcenter_ca_cert_file: assets/vcenter1.sboyle.internal.cer
+
+sshKeyFile: assets/ssh-key.pub # Path to your SSH public key
+pullSecretFile: assets/pull-secret.json # Path to your pull secret JSON
+consolePasswordFile: assets/console-password.txt # Path to your htpasswd hash file
+
+rhcos_vm_template: /Lab/vm/OpenShift/RHCOS-4.16-Template
