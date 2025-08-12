@@ -7,7 +7,7 @@ export OPENSHIFT_INSTALL_PRESERVE_BOOTSTRAP=true
 
 CLUSTER_YAML="$1"
 
-if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
+if [[ -z "${CLUSTER_YAML:-}" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
@@ -21,6 +21,16 @@ source "$SCRIPTS/load-vcenter-env.sh"
 log_step() {
   echo -e "\n⏱ $(date +'%F %T') - $1"
 }
+
+# Ensure we kill the HTTP server on exit (best-effort)
+HTTP_SERVER_PID=""
+cleanup_http() {
+  if [[ -n "${HTTP_SERVER_PID:-}" ]]; then
+    echo "🧹 Stopping Ignition server (PID ${HTTP_SERVER_PID})..."
+    kill "${HTTP_SERVER_PID}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_http EXIT
 
 log_step "1️⃣ Validating input YAML file..."
 echo "✅ Cluster name: $CLUSTER_NAME"
@@ -44,56 +54,56 @@ openshift-install create manifests --dir="$INSTALL_DIR" --log-level=debug
 openshift-install create ignition-configs --dir="$INSTALL_DIR" --log-level=debug
 
 log_step "6️⃣ Generating network configurations to fix OVS conflicts..."
-echo "🔧 Creating NetworkManager configs to override VM template OVS bridges..."
 "$SCRIPTS/generate-network-manifests.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
 
 log_step "6.5️⃣ Merging network configs into ignition files..."
-echo "🔧 Injecting network configurations into individual node ignition files..."
 "$SCRIPTS/merge-network-ignition.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
 
-log_step "7️⃣ Deploying VMs with network-corrected ignition configs"
-echo "🚀 Deploying VMs with ignition files that will override OVS configuration..."
-"$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML"
+# --- New: start Ignition HTTP server on port 8088 ---
+log_step "6.8️⃣ Starting Ignition HTTP server (port 8088)"
+IGN_DIR="${INSTALL_DIR}"
+IGN_PORT=8088
+# Start server in background
+"$SCRIPTS/start-ignition-server.sh" "$IGN_DIR" "$IGN_PORT" &
+HTTP_SERVER_PID=$!
+sleep 2
+# Lightweight health check
+if curl -sSf -o /dev/null "http://127.0.0.1:${IGN_PORT}/"; then
+  echo "✅ Ignition server is responding locally on port ${IGN_PORT}."
+else
+  echo "⚠️  Ignition server did not respond locally; continuing, but VMs may fail to fetch."
+fi
+
+log_step "7️⃣ Deploying VMs with ignition via URL"
+"$SCRIPTS/deploy-vms.sh" "$CLUSTER_YAML" "$INSTALL_DIR"
 
 log_step "8️⃣ Monitoring bootstrap progress (wait for completion)"
-echo "⏳ Waiting for bootstrap to complete..."
-echo "💡 This may take 15-30 minutes as nodes override OVS config and initialize OVN-Kubernetes..."
-
-# Set kubeconfig for monitoring
 export KUBECONFIG="$INSTALL_DIR/auth/kubeconfig"
-
-# Wait for bootstrap completion with better error handling
-BOOTSTRAP_TIMEOUT=3600  # 60 minutes timeout
+BOOTSTRAP_TIMEOUT=3600
 BOOTSTRAP_START_TIME=$(date +%s)
 
 while true; do
   CURRENT_TIME=$(date +%s)
   ELAPSED_TIME=$((CURRENT_TIME - BOOTSTRAP_START_TIME))
-  
   if [[ $ELAPSED_TIME -gt $BOOTSTRAP_TIMEOUT ]]; then
     echo "❌ Bootstrap timed out after ${BOOTSTRAP_TIMEOUT} seconds"
-    echo "💡 Check cluster logs: openshift-install wait-for bootstrap-complete --dir=$INSTALL_DIR --log-level=debug"
+    echo "💡 Check logs: openshift-install wait-for bootstrap-complete --dir=$INSTALL_DIR --log-level=debug"
     exit 1
   fi
-  
-  # Check bootstrap completion
   if openshift-install wait-for bootstrap-complete --dir="$INSTALL_DIR" --log-level=info; then
     echo "✅ Bootstrap completed successfully!"
     break
   else
-    echo "⌛ Still waiting for bootstrap to complete... (elapsed: ${ELAPSED_TIME}s)"
+    echo "⌛ Still waiting for bootstrap... (elapsed: ${ELAPSED_TIME}s)"
     sleep 30
   fi
 done
 
 log_step "9️⃣ Removing bootstrap VM"
-echo "🧹 Cleaning up bootstrap node..."
-# Uncomment when ready to remove bootstrap
+echo "🧹 Bootstrap removal is manual in this runbook."
 # "$SCRIPTS/cleanup-bootstrap.sh" "$CLUSTER_YAML"
-echo "⚠️  Bootstrap cleanup commented out - remove manually when ready"
 
 log_step "🔟 Waiting for cluster operators to stabilize..."
-echo "⏳ Waiting for cluster installation to complete..."
 if openshift-install wait-for install-complete --dir="$INSTALL_DIR" --log-level=info; then
   echo "✅ Cluster installation completed!"
 else
@@ -101,21 +111,25 @@ else
 fi
 
 log_step "1️⃣1️⃣ Applying taint fix and labels"
-echo "🔧 Fixing cloud provider taints..."
 "$SCRIPTS/fix-cloud-provider-taints.sh"
-echo "🏷️  Applying node labels..."
 "$SCRIPTS/label-nodes.sh" "$CLUSTER_YAML"
 
 log_step "1️⃣2️⃣ Verifying cluster health"
-echo "🩺 Checking cluster operator status..."
-if oc get co --no-headers | grep -E "(False|Unknown|True.*True)" | head -5; then
-  echo "⚠️  Some operators may still be initializing - this is normal"
-  echo "💡 Run 'oc get co' to monitor operator status"
-fi
+for i in {1..40}; do
+  AVAILABLE=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Available")].status}' || echo "")
+  PROGRESSING=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Progressing")].status}' || echo "")
+  DEGRADED=$(oc get clusterversion version -o jsonpath='{.status.conditions[?(@.type=="Degraded")].status}' || echo "")
+  echo "ClusterVersion: Available=$AVAILABLE Progressing=$PROGRESSING Degraded=$DEGRADED"
+  if [[ "$AVAILABLE" == "True" && "$PROGRESSING" == "False" && "$DEGRADED" == "False" ]]; then
+    echo "✅ Cluster healthy."
+    break
+  fi
+  echo "⌛ Operators still settling… retry $i/40"
+  sleep 15
+done
 
 echo -e "\n🎉 Cluster rebuild complete!"
 
-# Final step: Show kubeadmin login information
 log_step "🔐 Cluster access information"
 KUBEADMIN_PASS_FILE="$INSTALL_DIR/auth/kubeadmin-password"
 if [[ -f "$KUBEADMIN_PASS_FILE" ]]; then
@@ -124,18 +138,10 @@ if [[ -f "$KUBEADMIN_PASS_FILE" ]]; then
   echo "🌐 Console URL: https://console-openshift-console.apps.$CLUSTER_NAME.$(yq e '.baseDomain' "$CLUSTER_YAML")"
   echo "🔐 Login via CLI:"
   echo "oc login -u kubeadmin -p $KUBEADMIN_PASS https://api.$CLUSTER_NAME.$(yq e '.baseDomain' "$CLUSTER_YAML"):6443"
-  echo ""
-  echo "📊 Quick health check commands:"
-  echo "  oc get co                    # Check cluster operators"
-  echo "  oc get nodes                 # Check node status"  
-  echo "  oc get pods -A | grep -v Running  # Check for failed pods"
 else
-  echo "⚠️ kubeadmin password not found in $KUBEADMIN_PASS_FILE"
+  echo "⚠️ kubeadmin password not found at $KUBEADMIN_PASS_FILE"
 fi
 
 echo ""
 echo "💡 If you encounter OVS bridge issues:"
-echo "   1. Check: ssh core@master-X 'sudo nmcli con show'"
-echo "   2. Expected: No 'br-ex' or 'ovs-*' connections"
-echo "   3. Expected: 'ens192' or similar ethernet connection with static IP"
-echo "   4. Check OVN pods: oc get pods -n openshift-ovn-kubernetes"
+echo "   ssh core@master-X 'sudo nmcli con show'  # Expect no br-ex / ovs-*"

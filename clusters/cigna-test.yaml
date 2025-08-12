@@ -65,12 +65,6 @@ vm_sizing:
     memory_gb: 16
     disk_gb: 120
 
-# Ignition server (only used if you switch to guestinfo.ignition.config.url mode)
-ignition_server:
-  host_ip: 192.168.42.10
-  port: 8080
-
-
 # Optional labels applied post-install
 labels:
   master:

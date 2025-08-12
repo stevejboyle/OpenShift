@@ -11,4 +11,4 @@ fi
 cd "$INSTALL_DIR"
 echo "📦 Serving Ignition files from $INSTALL_DIR on port $PORT (http://0.0.0.0:$PORT/)"
 # macOS + Linux compatible
-python3 -m http.server "$PORT" --bind 0.0.0.0
+python3 -m http.server "$PORT" --bind 0.0.0.0 --directory $INSTALL_DIR
