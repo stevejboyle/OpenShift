@@ -1,20 +1,19 @@
-# Sample cluster config for OpenShift UPI on ESXi (UPI)
 clusterName: cigna-test
-baseDomain: example.internal
+baseDomain: openshift.sboyle.internal 
+vcenter_server: vcenter1.sboyle.internal
+vcenter_username: administrator@vsphere.sboyle.internal # Use your vCenter SSO domain
 
-# vCenter / govc parameters
-vcenter_server: vcsa01.example.internal
-vcenter_username: 'administrator@vsphere.local'
-vcenter_datacenter: 'Datacenter'
-vcenter_cluster: 'Compute-Cluster'
-vcenter_datastore: 'nvme-datastore01'
-vcenter_network: 'VM Network'
-# Optional: override the VM folder path; if omitted, scripts will use /<DC>/vm/OpenShift/<clusterName>
-vcenter_folder: '/Datacenter/vm/OpenShift/cigna-test'
+vcenter_datacenter: Lab 
+vcenter_cluster: "Lab Cluster" 
+vcenter_datastore: datastore-SAN1 
+vcenter_network: OpenShift_192.168.42.0
+vcenter_ca_cert_file: assets/vcenter1.sboyle.internal.cer
 
-# Path to a pre-prepared RHCOS VM template (must be a template or a powered-off VM used for cloning)
-rhcos_vm_template: '/Datacenter/vm/Templates/rhcos-4.16-template'
+sshKeyFile: assets/ssh-key.pub # Path to your SSH public key
+pullSecretFile: assets/pull-secret.json # Path to your pull secret JSON
+consolePasswordFile: assets/console-password.txt # Path to your htpasswd hash file
 
+rhcos_vm_template: /Lab/vm/OpenShift/RHCOS-4.16-Template
 # Network plan
 network:
   cidr: 192.168.42.0/24
