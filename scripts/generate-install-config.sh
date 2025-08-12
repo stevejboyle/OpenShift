@@ -2,7 +2,7 @@
 set -euo pipefail
 
 CLUSTER_YAML="$1"
-if [[ -z "$CLUSTER_YAML" || ! -f "$CLUSTER_YAML" ]]; then
+if [[ -z "${CLUSTER_YAML:-}" || ! -f "$CLUSTER_YAML" ]]; then
   echo "❌ Cluster YAML not found: $CLUSTER_YAML"
   exit 1
 fi
@@ -16,65 +16,41 @@ mkdir -p "$INSTALL_DIR" || { echo "❌ Failed to create directory: $INSTALL_DIR"
 echo "DEBUG: CLUSTER_NAME=$CLUSTER_NAME"
 echo "DEBUG: INSTALL_DIR=$INSTALL_DIR"
 
-# Load fields from YAML with explicit error handling and debug output
-BASE_DOMAIN=$(yq e '.baseDomain' "$CLUSTER_YAML" || { echo "❌ Failed to read baseDomain from $CLUSTER_YAML"; exit 1; })
-VCENTER_SERVER=$(yq e '.vcenter_server' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_server from $CLUSTER_YAML"; exit 1; })
-VCENTER_USERNAME=$(yq e '.vcenter_username' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_username from $CLUSTER_YAML"; exit 1; })
-VCENTER_DATACENTER=$(yq e '.vcenter_datacenter' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_datacenter from $CLUSTER_YAML"; exit 1; })
-VCENTER_CLUSTER=$(yq e '.vcenter_cluster' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_cluster from $CLUSTER_YAML"; exit 1; })
-VCENTER_DATASTORE=$(yq e '.vcenter_datastore' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_datastore from $CLUSTER_YAML"; exit 1; })
-VCENTER_NETWORK=$(yq e '.vcenter_network' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_network from $CLUSTER_YAML"; exit 1; })
+BASE_DOMAIN=$(yq e '.baseDomain' "$CLUSTER_YAML")
+VCENTER_SERVER=$(yq e '.vcenter_server' "$CLUSTER_YAML")
+VCENTER_USERNAME=$(yq e '.vcenter_username' "$CLUSTER_YAML")
+VCENTER_DATACENTER=$(yq e '.vcenter_datacenter' "$CLUSTER_YAML")
+VCENTER_CLUSTER=$(yq e '.vcenter_cluster' "$CLUSTER_YAML")
+VCENTER_DATASTORE=$(yq e '.vcenter_datastore' "$CLUSTER_YAML")
+VCENTER_NETWORK=$(yq e '.vcenter_network' "$CLUSTER_YAML")
 
-# Use GOVC_PASSWORD from environment
 if [[ -z "${GOVC_PASSWORD:-}" ]]; then
-  echo "❌ GOVC_PASSWORD environment variable is not set."
-  echo "   Ensure load-vcenter-env.sh was sourced correctly before calling this script."
+  echo "❌ GOVC_PASSWORD is not set (source load-vcenter-env.sh first)."
   exit 1
 fi
 echo "DEBUG: GOVC_PASSWORD_LENGTH=${#GOVC_PASSWORD} bytes"
 
-SSH_KEY_FILE_PATH=$(yq e '.sshKeyFile' "$CLUSTER_YAML" || { echo "❌ Failed to read sshKeyFile path from $CLUSTER_YAML"; exit 1; })
-if [[ ! -f "$SSH_KEY_FILE_PATH" ]]; then echo "❌ SSH key file not found: $SSH_KEY_FILE_PATH"; exit 1; fi
+SSH_KEY_FILE_PATH=$(yq e '.sshKeyFile' "$CLUSTER_YAML")
+[[ -f "$SSH_KEY_FILE_PATH" ]] || { echo "❌ SSH key file not found: $SSH_KEY_FILE_PATH"; exit 1; }
 SSH_KEY=$(<"$SSH_KEY_FILE_PATH")
 echo "DEBUG: SSH_KEY_LENGTH=${#SSH_KEY} bytes"
 
-PULL_SECRET_FILE_PATH=$(yq e '.pullSecretFile' "$CLUSTER_YAML" || { echo "❌ Failed to read pullSecretFile path from $CLUSTER_YAML"; exit 1; })
-if [[ ! -f "$PULL_SECRET_FILE_PATH" ]]; then echo "❌ Pull secret file not found: $PULL_SECRET_FILE_PATH"; exit 1; fi
+PULL_SECRET_FILE_PATH=$(yq e '.pullSecretFile' "$CLUSTER_YAML")
+[[ -f "$PULL_SECRET_FILE_PATH" ]] || { echo "❌ Pull secret file not found: $PULL_SECRET_FILE_PATH"; exit 1; }
 PULL_SECRET=$(<"$PULL_SECRET_FILE_PATH")
 echo "DEBUG: PULL_SECRET_LENGTH=${#PULL_SECRET} bytes"
 
-# Network details from YAML
-NETWORK_CIDR=$(yq e '.network.cidr' "$CLUSTER_YAML" || { echo "❌ Failed to read network.cidr from $CLUSTER_YAML"; exit 1; })
+NETWORK_CIDR=$(yq e '.network.cidr' "$CLUSTER_YAML")
 
-# --- NEW: Read node counts from cluster YAML ---
-MASTER_REPLICAS=$(yq '.node_counts.master' "$CLUSTER_YAML" || { echo "❌ Failed to read node_counts.master from $CLUSTER_YAML"; exit 1; })
-WORKER_REPLICAS=$(yq '.node_counts.worker' "$CLUSTER_YAML" || { echo "❌ Failed to read node_counts.worker from $CLUSTER_YAML"; exit 1; })
+MASTER_REPLICAS=$(yq '.node_counts.master // 3' "$CLUSTER_YAML")
+WORKER_REPLICAS=$(yq '.node_counts.worker // 2' "$CLUSTER_YAML")
 echo "DEBUG: MASTER_REPLICAS=$MASTER_REPLICAS"
 echo "DEBUG: WORKER_REPLICAS=$WORKER_REPLICAS"
 
-# Read vCenter CA Certificate File Path from cluster YAML
-VCENTER_CA_CERT_FILE_PATH=$(yq e '.vcenter_ca_cert_file' "$CLUSTER_YAML" || { echo "❌ Failed to read vcenter_ca_cert_file path from $CLUSTER_YAML"; exit 1; })
-if [[ ! -f "$VCENTER_CA_CERT_FILE_PATH" ]]; then
-  echo "❌ vCenter CA certificate file not found: $VCENTER_CA_CERT_FILE_PATH"
-  echo "   Please ensure the path in your cluster YAML is correct and the file exists."
-  exit 1
-fi
-# No need for VCENTER_CA_CERT variable assignment here.
-# The processing will happen directly in the cat <<EOF block.
+VCENTER_CA_CERT_FILE_PATH=$(yq e '.vcenter_ca_cert_file' "$CLUSTER_YAML")
+[[ -f "$VCENTER_CA_CERT_FILE_PATH" ]] || { echo "❌ vCenter CA certificate file not found: $VCENTER_CA_CERT_FILE_PATH"; exit 1; }
 
-# Debugging: Print a few critical variables
-echo "DEBUG: BASE_DOMAIN=$BASE_DOMAIN"
-echo "DEBUG: VCENTER_SERVER=$VCENTER_SERVER"
-echo "DEBUG: PULL_SECRET_LENGTH=${#PULL_SECRET} bytes"
-echo "DEBUG: SSH_KEY_LENGTH=${#SSH_KEY} bytes"
-# No VCENTER_CA_CERT_LENGTH debug here as it's not stored in a simple variable now.
-
-# Full paths required for OpenShift installer
-CLUSTER_PATH="/$VCENTER_DATACENTER/host/$VCENTER_CLUSTER"
-DATASTORE_PATH="/$VCENTER_DATACENTER/datastore/$VCENTER_DATASTORE"
-
-# Execute the cat command and redirect to the install-config.yaml
-cat > "$INSTALL_DIR/install-config.yaml" <<EOF || { echo "❌ Failed to write install-config.yaml content due to 'cat' failure."; exit 1; }
+cat > "$INSTALL_DIR/install-config.yaml" <<EOF || { echo "❌ Failed to write install-config.yaml"; exit 1; }
 apiVersion: v1
 baseDomain: $BASE_DOMAIN
 metadata:
@@ -82,17 +58,17 @@ metadata:
 platform:
   none: {}
 additionalTrustBundle: |
-$(cat "$VCENTER_CA_CERT_FILE_PATH" | tr -d '\r' | awk '{printf "      %s\n", $0}')
+$(tr -d '\r' < "$VCENTER_CA_CERT_FILE_PATH" | awk '{printf "      %s\n", $0}')
 pullSecret: |
   $PULL_SECRET
 sshKey: |
   $SSH_KEY
 controlPlane:
   name: master
-  replicas: ${MASTER_REPLICAS} # <--- FIX: Use dynamic MASTER_REPLICAS
+  replicas: ${MASTER_REPLICAS}
 compute:
 - name: worker
-  replicas: ${WORKER_REPLICAS} # <--- FIX: Use dynamic WORKER_REPLICAS
+  replicas: ${WORKER_REPLICAS}
 networking:
   clusterNetwork:
   - cidr: 10.128.0.0/14
@@ -104,11 +80,9 @@ networking:
   - 172.30.0.0/16
 EOF
 
-# Add a check for file size after creation
 GENERATED_FILE_SIZE=$(stat -f %z "$INSTALL_DIR/install-config.yaml" 2>/dev/null || stat -c %s "$INSTALL_DIR/install-config.yaml" 2>/dev/null)
 if [[ "$GENERATED_FILE_SIZE" -eq 0 ]]; then
-  echo "❌ Error: install-config.yaml was generated as a zero-byte file!"
-  echo "   This means content was not written or the 'cat' command failed."
+  echo "❌ Error: install-config.yaml is zero bytes!"
   exit 1
 else
   echo "DEBUG: Generated install-config.yaml size: $GENERATED_FILE_SIZE bytes"
