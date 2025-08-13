@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Use guestinfo.ignition.config.url to bypass vSphere guestinfo size limits.
-# macOS Bash 3.2–compatible; cross-platform base64 not required here.
+# Deploy VMs using a tiny inline Ignition that replaces itself with the real URL.
+# This guarantees Ignition sees "user config provided" and then pulls the full .ign.
 set -euo pipefail
 
 CLUSTER_YAML="$1"
@@ -25,8 +25,7 @@ source "${SCRIPTS_DIR}/load-vcenter-env.sh" "$CLUSTER_YAML"
 : "${GOVC_FOLDER:=/}"
 
 CLUSTER_NAME="$(yq e -r '.clusterName' "$CLUSTER_YAML")"
-VM_CLUSTER_FOLDER_NAME="${CLUSTER_NAME}"
-FULL_VCENTER_VM_FOLDER_PATH="${GOVC_FOLDER}/${VM_CLUSTER_FOLDER_NAME}"
+FULL_VCENTER_VM_FOLDER_PATH="${GOVC_FOLDER%/}/${CLUSTER_NAME}"
 
 RHCOS_VM_TEMPLATE_PATH="$(yq e -r '.rhcos_vm_template' "$CLUSTER_YAML")"
 if [[ -z "$RHCOS_VM_TEMPLATE_PATH" || "$RHCOS_VM_TEMPLATE_PATH" == "null" ]]; then
@@ -35,7 +34,7 @@ if [[ -z "$RHCOS_VM_TEMPLATE_PATH" || "$RHCOS_VM_TEMPLATE_PATH" == "null" ]]; th
 fi
 
 IGNITION_HOST="$(yq e -r '.ignition_server.host_ip // "127.0.0.1"' "$CLUSTER_YAML")"
-IGNITION_PORT="$(yq e -r '.ignition_server.port // 8080' "$CLUSTER_YAML")"
+IGNITION_PORT="$(yq e -r '.ignition_server.port // 8088' "$CLUSTER_YAML")"
 IGN_BASE_URL="http://${IGNITION_HOST}:${IGNITION_PORT}"
 
 echo "🔍 Ensuring VM folder exists: ${FULL_VCENTER_VM_FOLDER_PATH}"
@@ -46,28 +45,24 @@ fi
 MASTER_REPLICAS="$(yq e -r '.node_counts.master // 0' "$CLUSTER_YAML")"
 WORKER_REPLICAS="$(yq e -r '.node_counts.worker // 0' "$CLUSTER_YAML")"
 
-# Node list
 NODES="bootstrap"
 i=0; while (( i < MASTER_REPLICAS )); do NODES="$NODES master-${i}"; i=$((i+1)); done
 i=0; while (( i < WORKER_REPLICAS )); do NODES="$NODES worker-${i}"; i=$((i+1)); done
 
-echo "VMs to deploy: $NODES"
-echo "⏱ $(date '+%Y-%m-%d %H:%M:%S') - 🚀 Deploying VMs (Ignition via URL: $IGN_BASE_URL)..."
-
-# Quick check that the HTTP server is up (warn only)
+# Fail-fast if server not responding locally
 if ! curl -sSf -o /dev/null "${IGN_BASE_URL}/"; then
-  echo "⚠️  WARNING: ${IGN_BASE_URL}/ is not reachable from this host. Ensure your HTTP server is running and accessible by the VMs."
+  echo "❌ Ignition HTTP server is not responding at ${IGN_BASE_URL}/"
+  exit 1
 fi
 
 for node in $NODES; do
   vm_name="${CLUSTER_NAME}-${node}"
+  VM_IPATH="${FULL_VCENTER_VM_FOLDER_PATH%/}/${vm_name}"
 
-  # Choose ignition filename (per-node if present; else role-wide)
   case "$node" in
     bootstrap) ign_file="bootstrap.ign" ;;
     master-*)  ign_file="${node}.ign"; if [[ ! -f "$INSTALL_DIR/$ign_file" ]]; then ign_file="master.ign"; fi ;;
     worker-*)  ign_file="${node}.ign"; if [[ ! -f "$INSTALL_DIR/$ign_file" ]]; then ign_file="worker.ign"; fi ;;
-    *) echo "❌ Unknown node type: $node"; exit 1 ;;
   esac
 
   if [[ ! -f "$INSTALL_DIR/$ign_file" ]]; then
@@ -76,39 +71,19 @@ for node in $NODES; do
   fi
 
   IGN_URL="${IGN_BASE_URL}/${ign_file}"
-  # Optional: HEAD check (warn only)
-  if ! curl -sI "$IGN_URL" | head -1 | grep -q "200"; then
-    echo "⚠️  WARNING: $IGN_URL not returning HTTP 200 from this host. VMs may still reach it if network differs."
-  fi
 
-  # Defaults
-  CPU=4; MEMORY_GB=16; DISK_GB=120; VM_MAC=""
-
+  # Resources & MAC
+  CPU="$(yq e -r '.vm_sizing.bootstrap.cpu // 4' "$CLUSTER_YAML")"; MEMORY_GB="$(yq e -r '.vm_sizing.bootstrap.memory_gb // 16' "$CLUSTER_YAML")"; DISK_GB="$(yq e -r '.vm_sizing.bootstrap.disk_gb // 120' "$CLUSTER_YAML")"; VM_MAC=""
   case "$node" in
-    bootstrap)
-      CPU="$(yq e -r '.vm_sizing.bootstrap.cpu // 4' "$CLUSTER_YAML")"
-      MEMORY_GB="$(yq e -r '.vm_sizing.bootstrap.memory_gb // 16' "$CLUSTER_YAML")"
-      DISK_GB="$(yq e -r '.vm_sizing.bootstrap.disk_gb // 120' "$CLUSTER_YAML")"
-      VM_MAC="$(yq e -r '.node_macs.bootstrap // ""' "$CLUSTER_YAML")"
-      ;;
-    master-*)
-      CPU="$(yq e -r '.vm_sizing.master.cpu // 8' "$CLUSTER_YAML")"
-      MEMORY_GB="$(yq e -r '.vm_sizing.master.memory_gb // 32' "$CLUSTER_YAML")"
-      DISK_GB="$(yq e -r '.vm_sizing.master.disk_gb // 120' "$CLUSTER_YAML")"
-      VM_MAC="$(yq e -r ".node_macs[\"${node}\"] // \"\"" "$CLUSTER_YAML")"
-      ;;
-    worker-*)
-      CPU="$(yq e -r '.vm_sizing.worker.cpu // 4' "$CLUSTER_YAML")"
-      MEMORY_GB="$(yq e -r '.vm_sizing.worker.memory_gb // 16' "$CLUSTER_YAML")"
-      DISK_GB="$(yq e -r '.vm_sizing.worker.disk_gb // 120' "$CLUSTER_YAML")"
-      VM_MAC="$(yq e -r ".node_macs[\"${node}\"] // \"\"" "$CLUSTER_YAML")"
-      ;;
+    bootstrap) VM_MAC="$(yq e -r '.node_macs.bootstrap // ""' "$CLUSTER_YAML")" ;;
+    master-*)  CPU="$(yq e -r '.vm_sizing.master.cpu // 8' "$CLUSTER_YAML")"; MEMORY_GB="$(yq e -r '.vm_sizing.master.memory_gb // 32' "$CLUSTER_YAML")"; DISK_GB="$(yq e -r '.vm_sizing.master.disk_gb // 120' "$CLUSTER_YAML")"; VM_MAC="$(yq e -r ".node_macs[\"${node}\"] // \"\"" "$CLUSTER_YAML")" ;;
+    worker-*)  CPU="$(yq e -r '.vm_sizing.worker.cpu // 4' "$CLUSTER_YAML")"; MEMORY_GB="$(yq e -r '.vm_sizing.worker.memory_gb // 16' "$CLUSTER_YAML")"; DISK_GB="$(yq e -r '.vm_sizing.worker.disk_gb // 120' "$CLUSTER_YAML")"; VM_MAC="$(yq e -r ".node_macs[\"${node}\"] // \"\"" "$CLUSTER_YAML")" ;;
   esac
 
   echo "Creating VM: $vm_name (${CPU} vCPU, ${MEMORY_GB}GB RAM, ${DISK_GB}GB Disk)"
-  if [[ -n "$VM_MAC" && "$VM_MAC" != "null" ]]; then echo "   Desired MAC: $VM_MAC"; else echo "   MAC: auto"; fi
+  [[ -n "$VM_MAC" && "$VM_MAC" != "null" ]] && echo "   Desired MAC: $VM_MAC" || echo "   MAC: auto"
 
-  govc vm.destroy -vm.ipath="${FULL_VCENTER_VM_FOLDER_PATH}/${vm_name}" 2>/dev/null || true
+  govc vm.destroy -vm.ipath "${VM_IPATH}" 2>/dev/null || true
 
   GOVC_CLONE_OPTIONS=(
     -vm="$RHCOS_VM_TEMPLATE_PATH"
@@ -119,37 +94,35 @@ for node in $NODES; do
     -on=false
     -c="${CPU}" -m=$((MEMORY_GB * 1024))
   )
-  if [[ -n "$VM_MAC" && "$VM_MAC" != "null" ]]; then
-    GOVC_CLONE_OPTIONS+=("-net.address=${VM_MAC}")
-  fi
+  [[ -n "$VM_MAC" && "$VM_MAC" != "null" ]] && GOVC_CLONE_OPTIONS+=("-net.address=${VM_MAC}")
 
-  set +e
-  CLONE_OUT="$(govc vm.clone "${GOVC_CLONE_OPTIONS[@]}" "$vm_name" 2>&1)"
-  CLONE_STATUS=$?
-  set -e
-  if [[ "$CLONE_STATUS" -ne 0 ]]; then
-    echo "❌ govc vm.clone failed ($CLONE_STATUS):"
-    echo "$CLONE_OUT"
-    exit 1
-  fi
-  echo "✅ Clone OK."
+  govc vm.clone "${GOVC_CLONE_OPTIONS[@]}" "$vm_name"
 
-  echo "⚙️  Resizing disk for $vm_name to ${DISK_GB}GB..."
-  govc vm.disk.change -vm "$vm_name" -disk.label="Hard disk 1" -size="${DISK_GB}GB" || {
-    echo "❌ Disk resize failed for $vm_name"; exit 1; }
-  sleep 3
+  govc vm.disk.change -vm.ipath "${VM_IPATH}" -disk.label="Hard disk 1" -size="${DISK_GB}GB"
+  sleep 1
 
-  # Use URL instead of embedding ignition
-  KERNEL_ARGS="console=ttyS0,115200 ignition.firstboot ignition.platform.id=vsphere"
-  govc vm.change -vm "$vm_name" \
-    -e "guestinfo.ignition.config.url=${IGN_URL}" \
-    -e "guestinfo.ignition.config.data.encoding=" \
-    -e "guestinfo.ignition.config.data=" \
-    -e "guestinfo.kernel.args=${KERNEL_ARGS}" || {
-      echo "❌ Failed to set guestinfo URL for $vm_name"; exit 1; }
+  # Force vmware platform and enable UUID
+  KERNEL_ARGS="console=ttyS0,115200 ignition.firstboot ignition.platform.id=vmware coreos.platform_id=vmware"
+  govc vm.change -vm.ipath "${VM_IPATH}" \
+    -e "disk.enableUUID=TRUE" \
+    -e "guestinfo.ignition.config.data.encoding=base64" \
+    -e "guestinfo.kernel.args=${KERNEL_ARGS}"
 
-  echo "⚡ Powering on: $vm_name (Ignition: $IGN_URL)"
-  govc vm.power -on=true "$vm_name"
+  # Set tiny inline config that replaces with the URL
+  MIN_IGN="{\"ignition\":{\"version\":\"3.4.0\",\"config\":{\"replace\":{\"source\":\"${IGN_URL}\"}}}}"
+  B64=$(printf "%s" "$MIN_IGN" | base64 | tr -d '\n')
+  govc vm.change -vm.ipath "${VM_IPATH}" \
+    -e "guestinfo.ignition.config.data=${B64}" \
+    -e "guestinfo.ignition.config.url="
+
+  # Verify
+  EC="$(govc vm.info -e -vm.ipath "${VM_IPATH}")"
+  echo "$EC" | grep -E 'guestinfo\.ignition\.config\.data' >/dev/null || { echo "❌ guestinfo.ignition.config.data missing"; exit 1; }
+  echo "$EC" | grep -E 'guestinfo\.ignition\.config\.data\.encoding.*base64' >/dev/null || { echo "❌ guestinfo.ignition.config.data.encoding != base64"; exit 1; }
+  echo "$EC" | grep -E 'ignition\.platform\.id=vmware' >/dev/null || { echo "❌ kernel args missing ignition.platform.id=vmware"; exit 1; }
+
+  echo "⚡ Powering on: $vm_name"
+  govc vm.power -on=true -vm.ipath "${VM_IPATH}"
 done
 
-echo "✅ VM deployment complete (URL mode)!"
+echo "✅ VM deployment complete (inline replace → URL)"

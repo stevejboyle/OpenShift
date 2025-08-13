@@ -19,8 +19,8 @@ network:
   cidr: 192.168.42.0/24
   gateway: 192.168.42.1
   dns_servers:
-    - 192.168.42.10
-    - 192.168.42.11
+    - 192.168.1.97
+    - 192.168.1.98
   interface: ens192
 
 # Node counts
@@ -43,12 +43,12 @@ node_ips:
 
 # Optional: Pin NM profile to MAC to avoid interface rename issues
 node_macs:
-  bootstrap: "00:50:56:AA:00:30"
-  master-0: "00:50:56:AA:00:31"
-  master-1: "00:50:56:AA:00:32"
-  master-2: "00:50:56:AA:00:33"
-  worker-0: "00:50:56:AA:00:41"
-  worker-1: "00:50:56:AA:00:42"
+  bootstrap: "00:50:56:00:42:01"
+  master-0: "00:50:56:00:42:02"
+  master-1: "00:50:56:00:42:02"
+  master-2: "00:50:56:00:42:03"
+  worker-0: "00:50:56:00:42:11"
+  worker-1: "00:50:56:00:42:12"
 
 # VM sizes
 vm_sizing:
